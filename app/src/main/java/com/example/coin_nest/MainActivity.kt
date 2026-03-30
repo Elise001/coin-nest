@@ -43,6 +43,8 @@ class MainActivity : ComponentActivity() {
                     HomeScreen(
                         state = state,
                         onAddTransaction = viewModel::addTransaction,
+                        onConfirmPendingAuto = viewModel::confirmPendingAuto,
+                        onIgnorePendingAuto = viewModel::ignorePendingAuto,
                         onAddCategory = viewModel::addCategory,
                         onSetMonthBudget = viewModel::setCurrentMonthBudget,
                         modifier = Modifier.padding(paddingValues)

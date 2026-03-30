@@ -9,8 +9,14 @@ data class TransactionEntity(
     val source: String,
     val note: String,
     val occurredAtEpochMs: Long,
-    val createdAtEpochMs: Long = System.currentTimeMillis()
+    val createdAtEpochMs: Long = System.currentTimeMillis(),
+    val status: String = STATUS_CONFIRMED,
+    val fingerprint: String? = null
 )
+
+const val STATUS_CONFIRMED = "CONFIRMED"
+const val STATUS_PENDING = "PENDING"
+const val STATUS_IGNORED = "IGNORED"
 
 data class CategoryEntity(
     val id: Long = 0L,

@@ -22,7 +22,8 @@ data class HomeUiState(
     val yearly: BalanceSummary = BalanceSummary(),
     val monthBudgetCents: Long? = null,
     val categories: List<CategoryItem> = emptyList(),
-    val transactions: List<TransactionEntity> = emptyList()
+    val transactions: List<TransactionEntity> = emptyList(),
+    val pendingAutoTransactions: List<TransactionEntity> = emptyList()
 )
 
 private data class SummaryAndCategory(
@@ -59,15 +60,17 @@ class CoinNestViewModel(
 
     val uiState: StateFlow<HomeUiState> = combine(
         summaryAndCategoryFlow,
-        repository.observeRecentTransactions(limit = 500)
-    ) { summary, txs ->
+        repository.observeRecentTransactions(limit = 300),
+        repository.observePendingAutoTransactions(limit = 80)
+    ) { summary, txs, pending ->
         HomeUiState(
             daily = summary.daily,
             monthly = summary.monthly,
             yearly = summary.yearly,
             monthBudgetCents = summary.monthBudgetCents,
             categories = summary.categories,
-            transactions = txs
+            transactions = txs,
+            pendingAutoTransactions = pending
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -91,13 +94,26 @@ class CoinNestViewModel(
                 TransactionInput(
                     amountCents = (amount * 100).toLong(),
                     type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
-                    parentCategory = parentCategory.ifBlank { if (isIncome) "收入" else "生活" },
-                    childCategory = childCategory.ifBlank { if (isIncome) "其他" else "未分类" },
+                    parentCategory = parentCategory.ifBlank { if (isIncome) "\u6536\u5165" else "\u751f\u6d3b" },
+                    childCategory = childCategory.ifBlank { if (isIncome) "\u5176\u4ed6" else "\u672a\u5206\u7c7b" },
                     source = "MANUAL",
                     note = note,
                     occurredAtEpochMs = System.currentTimeMillis()
                 )
             )
+        }
+    }
+
+    fun confirmPendingAuto(id: Long, parentCategory: String, childCategory: String) {
+        if (parentCategory.isBlank() || childCategory.isBlank()) return
+        viewModelScope.launch {
+            repository.confirmPendingTransaction(id, parentCategory, childCategory)
+        }
+    }
+
+    fun ignorePendingAuto(id: Long) {
+        viewModelScope.launch {
+            repository.ignorePendingTransaction(id)
         }
     }
 

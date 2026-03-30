@@ -87,6 +87,8 @@ private val zone: ZoneId = ZoneId.systemDefault()
 fun HomeScreen(
     state: HomeUiState,
     onAddTransaction: (String, Boolean, String, String, String) -> Unit,
+    onConfirmPendingAuto: (Long, String, String) -> Unit,
+    onIgnorePendingAuto: (Long) -> Unit,
     onAddCategory: (String, String) -> Unit,
     onSetMonthBudget: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -128,7 +130,12 @@ fun HomeScreen(
             }
             when (tabs[selectedTab]) {
                 HomeTab.Overview -> OverviewTab(state)
-                HomeTab.Record -> RecordTab(state, onAddTransaction)
+                HomeTab.Record -> RecordTab(
+                    state = state,
+                    onAddTransaction = onAddTransaction,
+                    onConfirmPendingAuto = onConfirmPendingAuto,
+                    onIgnorePendingAuto = onIgnorePendingAuto
+                )
                 HomeTab.Settings -> SettingsTab(state, onAddCategory, onSetMonthBudget)
             }
         }
@@ -295,7 +302,9 @@ private fun OverviewTab(state: HomeUiState) {
 @Composable
 private fun RecordTab(
     state: HomeUiState,
-    onAddTransaction: (String, Boolean, String, String, String) -> Unit
+    onAddTransaction: (String, Boolean, String, String, String) -> Unit,
+    onConfirmPendingAuto: (Long, String, String) -> Unit,
+    onIgnorePendingAuto: (Long) -> Unit
 ) {
     val context = LocalContext.current
     var amount by remember { mutableStateOf("") }
@@ -329,6 +338,51 @@ private fun RecordTab(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (state.pendingAutoTransactions.isNotEmpty()) {
+            item {
+                GlassCard {
+                    Text("\u5f85\u786e\u8ba4\u81ea\u52a8\u8bb0\u5f55", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "\u901a\u77e5\u5df2\u81ea\u52a8\u8bc6\u522b\uff0c\u8bf7\u6309\u5f53\u524d\u5206\u7c7b\u786e\u8ba4\u6216\u5ffd\u7565\u3002",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            items(state.pendingAutoTransactions.take(20), key = { it.id }) { pending ->
+                GlassCard {
+                    Text(
+                        text = "-${MoneyFormat.fromCents(pending.amountCents)}  ${pending.source}",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = pending.note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                onConfirmPendingAuto(pending.id, parentCategory, childCategory)
+                                Toast.makeText(context, "\u5df2\u786e\u8ba4\u5165\u8d26", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("\u6309\u5f53\u524d\u5206\u7c7b\u786e\u8ba4")
+                        }
+                        Button(
+                            onClick = { onIgnorePendingAuto(pending.id) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("\u5ffd\u7565")
+                        }
+                    }
+                }
+            }
+        }
         item {
             GlassCard {
                 Text("\u5feb\u901f\u8bb0\u8d26", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

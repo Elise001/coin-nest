@@ -1,95 +1,157 @@
 package com.example.coin_nest.data
 
+import android.content.ContentValues
 import android.content.Context
-import android.content.SharedPreferences
 import com.example.coin_nest.data.db.CategoryEntity
+import com.example.coin_nest.data.db.CoinNestDbHelper
 import com.example.coin_nest.data.db.MonthlyBudgetEntity
+import com.example.coin_nest.data.db.STATUS_CONFIRMED
+import com.example.coin_nest.data.db.STATUS_IGNORED
+import com.example.coin_nest.data.db.STATUS_PENDING
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.data.model.BalanceSummary
 import com.example.coin_nest.data.model.CategoryItem
 import com.example.coin_nest.data.model.TransactionInput
 import com.example.coin_nest.data.model.TransactionType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.coroutines.withContext
 
 class CoinNestRepository(context: Context) {
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-
-    private val transactionsState = MutableStateFlow(loadTransactions())
-    private val categoriesState = MutableStateFlow(loadCategories())
-    private val budgetsState = MutableStateFlow(loadBudgets())
+    private val dbHelper = CoinNestDbHelper(context.applicationContext)
+    private val changeTick = MutableStateFlow(0L)
 
     fun observeRecentTransactions(limit: Int = 50): Flow<List<TransactionEntity>> {
-        return transactionsState.map { it.sortedByDescending { tx -> tx.occurredAtEpochMs }.take(limit) }
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryRecentTransactions(limit, includePending = false)
+            }
+        }
+    }
+
+    fun observePendingAutoTransactions(limit: Int = 50): Flow<List<TransactionEntity>> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryPendingTransactions(limit)
+            }
+        }
     }
 
     fun observeSummary(startInclusive: Long, endExclusive: Long): Flow<BalanceSummary> {
-        return transactionsState.map { txs ->
-            val filtered = txs.filter { it.occurredAtEpochMs in startInclusive until endExclusive }
-            val income = filtered.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents }
-            val expense = filtered.filter { it.type == TransactionType.EXPENSE.name }.sumOf { it.amountCents }
-            BalanceSummary(incomeCents = income, expenseCents = expense)
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                querySummary(startInclusive = startInclusive, endExclusive = endExclusive)
+            }
         }
     }
 
     fun observeCategories(): Flow<List<CategoryItem>> {
-        return categoriesState.map { list -> list.map { CategoryItem(parent = it.parent, child = it.child) } }
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryCategories().map { row -> CategoryItem(row.parent, row.child) }
+            }
+        }
     }
 
-    suspend fun ensureDefaultCategories() {
-        if (categoriesState.value.isNotEmpty()) return
+    suspend fun ensureDefaultCategories() = withContext(Dispatchers.IO) {
+        if (queryCategories().isNotEmpty()) return@withContext
         val defaults = listOf(
-            CategoryEntity(id = 1, parent = "工作", child = "通勤"),
-            CategoryEntity(id = 2, parent = "工作", child = "学习"),
-            CategoryEntity(id = 3, parent = "生活", child = "餐饮"),
-            CategoryEntity(id = 4, parent = "生活", child = "日用品"),
-            CategoryEntity(id = 5, parent = "生活", child = "娱乐"),
-            CategoryEntity(id = 6, parent = "收入", child = "工资"),
-            CategoryEntity(id = 7, parent = "收入", child = "其他")
+            "\u5de5\u4f5c" to "\u901a\u52e4",
+            "\u5de5\u4f5c" to "\u5b66\u4e60",
+            "\u751f\u6d3b" to "\u9910\u996e",
+            "\u751f\u6d3b" to "\u65e5\u7528\u54c1",
+            "\u751f\u6d3b" to "\u5a31\u4e50",
+            "\u6536\u5165" to "\u5de5\u8d44",
+            "\u6536\u5165" to "\u5176\u4ed6"
         )
-        categoriesState.value = defaults
-        saveCategories(defaults)
+        val db = dbHelper.writableDatabase
+        db.beginTransaction()
+        try {
+            defaults.forEach { (parent, child) ->
+                val values = ContentValues().apply {
+                    put("parent", parent)
+                    put("child", child)
+                }
+                db.insertWithOnConflict("categories", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        notifyChanged()
     }
 
-    suspend fun addCategory(parent: String, child: String) {
-        val exists = categoriesState.value.any { it.parent == parent && it.child == child }
-        if (exists) return
-        val nextId = (categoriesState.value.maxOfOrNull { it.id } ?: 0L) + 1
-        val next = categoriesState.value + CategoryEntity(id = nextId, parent = parent, child = child)
-        categoriesState.value = next
-        saveCategories(next)
-    }
-
-    suspend fun addTransaction(input: TransactionInput) {
-        val nextId = (transactionsState.value.maxOfOrNull { it.id } ?: 0L) + 1
-        val tx = TransactionEntity(
-            id = nextId,
-            amountCents = input.amountCents,
-            type = input.type.name,
-            parentCategory = input.parentCategory,
-            childCategory = input.childCategory,
-            source = input.source,
-            note = input.note,
-            occurredAtEpochMs = input.occurredAtEpochMs
+    suspend fun addCategory(parent: String, child: String) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("parent", parent)
+            put("child", child)
+        }
+        dbHelper.writableDatabase.insertWithOnConflict(
+            "categories",
+            null,
+            values,
+            android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE
         )
-        val next = transactionsState.value + tx
-        transactionsState.value = next
-        saveTransactions(next)
+        notifyChanged()
     }
 
-    suspend fun upsertMonthBudget(monthKey: String, limitCents: Long) {
-        val next = budgetsState.value.toMutableMap().apply { put(monthKey, limitCents) }
-        budgetsState.value = next
-        saveBudgets(next)
+    suspend fun addTransaction(input: TransactionInput) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("amount_cents", input.amountCents)
+            put("type", input.type.name)
+            put("parent_category", input.parentCategory)
+            put("child_category", input.childCategory)
+            put("source", input.source)
+            put("note", input.note)
+            put("occurred_at_epoch_ms", input.occurredAtEpochMs)
+            put("created_at_epoch_ms", System.currentTimeMillis())
+            put("status", STATUS_CONFIRMED)
+        }
+        dbHelper.writableDatabase.insert("transactions", null, values)
+        notifyChanged()
+    }
+
+    suspend fun confirmPendingTransaction(
+        id: Long,
+        parentCategory: String,
+        childCategory: String
+    ) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("status", STATUS_CONFIRMED)
+            put("parent_category", parentCategory)
+            put("child_category", childCategory)
+        }
+        dbHelper.writableDatabase.update("transactions", values, "id = ?", arrayOf(id.toString()))
+        notifyChanged()
+    }
+
+    suspend fun ignorePendingTransaction(id: Long) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply { put("status", STATUS_IGNORED) }
+        dbHelper.writableDatabase.update("transactions", values, "id = ?", arrayOf(id.toString()))
+        notifyChanged()
+    }
+
+    suspend fun upsertMonthBudget(monthKey: String, limitCents: Long) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("month_key", monthKey)
+            put("limit_cents", limitCents)
+        }
+        dbHelper.writableDatabase.insertWithOnConflict(
+            "monthly_budget",
+            null,
+            values,
+            android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE
+        )
+        notifyChanged()
     }
 
     fun observeMonthBudget(monthKey: String): Flow<MonthlyBudgetEntity?> {
-        return budgetsState.map { map ->
-            map[monthKey]?.let { MonthlyBudgetEntity(monthKey = monthKey, limitCents = it) }
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryMonthBudget(monthKey)
+            }
         }
     }
 
@@ -97,124 +159,171 @@ class CoinNestRepository(context: Context) {
         monthKey: String,
         startInclusive: Long,
         endExclusive: Long
-    ): Pair<Long, Long?> {
-        val expense = transactionsState.value
-            .filter { it.type == TransactionType.EXPENSE.name }
-            .filter { it.occurredAtEpochMs in startInclusive until endExclusive }
-            .sumOf { it.amountCents }
-        return expense to budgetsState.value[monthKey]
+    ): Pair<Long, Long?> = withContext(Dispatchers.IO) {
+        val expense = querySummary(startInclusive, endExclusive).expenseCents
+        val budget = queryMonthBudget(monthKey)?.limitCents
+        expense to budget
     }
 
     suspend fun addAutoExpense(
         amountCents: Long,
         source: String,
         note: String,
-        parent: String = "待分类",
-        child: String = "自动识别"
-    ) {
-        addTransaction(
-            TransactionInput(
-                amountCents = amountCents,
-                type = TransactionType.EXPENSE,
-                parentCategory = parent,
-                childCategory = child,
-                source = source,
-                note = note,
-                occurredAtEpochMs = System.currentTimeMillis()
-            )
-        )
-    }
-
-    private fun saveTransactions(items: List<TransactionEntity>) {
-        val arr = JSONArray()
-        items.forEach { tx ->
-            arr.put(
-                JSONObject()
-                    .put("id", tx.id)
-                    .put("amountCents", tx.amountCents)
-                    .put("type", tx.type)
-                    .put("parentCategory", tx.parentCategory)
-                    .put("childCategory", tx.childCategory)
-                    .put("source", tx.source)
-                    .put("note", tx.note)
-                    .put("occurredAtEpochMs", tx.occurredAtEpochMs)
-                    .put("createdAtEpochMs", tx.createdAtEpochMs)
-            )
+        fingerprint: String,
+        parent: String = "\u5f85\u5206\u7c7b",
+        child: String = "\u81ea\u52a8\u8bc6\u522b"
+    ): Boolean = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("amount_cents", amountCents)
+            put("type", TransactionType.EXPENSE.name)
+            put("parent_category", parent)
+            put("child_category", child)
+            put("source", source)
+            put("note", note)
+            put("occurred_at_epoch_ms", System.currentTimeMillis())
+            put("created_at_epoch_ms", System.currentTimeMillis())
+            put("status", STATUS_PENDING)
+            put("fingerprint", fingerprint)
         }
-        prefs.edit().putString(KEY_TXS, arr.toString()).apply()
+        val insertedId = dbHelper.writableDatabase.insertWithOnConflict(
+            "transactions",
+            null,
+            values,
+            android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE
+        )
+        if (insertedId != -1L) {
+            notifyChanged()
+            true
+        } else {
+            false
+        }
     }
 
-    private fun loadTransactions(): List<TransactionEntity> {
-        val raw = prefs.getString(KEY_TXS, null) ?: return emptyList()
-        val arr = JSONArray(raw)
+    private fun notifyChanged() {
+        changeTick.value = System.currentTimeMillis()
+    }
+
+    private fun queryRecentTransactions(limit: Int, includePending: Boolean): List<TransactionEntity> {
+        val where = if (includePending) "status != ?" else "status = ?"
+        val args = if (includePending) arrayOf(STATUS_IGNORED) else arrayOf(STATUS_CONFIRMED)
+        val cursor = dbHelper.readableDatabase.query(
+            "transactions",
+            null,
+            where,
+            args,
+            null,
+            null,
+            "occurred_at_epoch_ms DESC",
+            limit.toString()
+        )
+        return cursor.use { c -> buildTransactions(c) }
+    }
+
+    private fun queryPendingTransactions(limit: Int): List<TransactionEntity> {
+        val cursor = dbHelper.readableDatabase.query(
+            "transactions",
+            null,
+            "status = ?",
+            arrayOf(STATUS_PENDING),
+            null,
+            null,
+            "occurred_at_epoch_ms DESC",
+            limit.toString()
+        )
+        return cursor.use { c -> buildTransactions(c) }
+    }
+
+    private fun querySummary(startInclusive: Long, endExclusive: Long): BalanceSummary {
+        val sql = """
+            SELECT 
+                COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount_cents ELSE 0 END), 0) AS income_sum,
+                COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount_cents ELSE 0 END), 0) AS expense_sum
+            FROM transactions
+            WHERE occurred_at_epoch_ms >= ? AND occurred_at_epoch_ms < ? AND status = ?
+        """.trimIndent()
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            sql,
+            arrayOf(startInclusive.toString(), endExclusive.toString(), STATUS_CONFIRMED)
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) {
+                BalanceSummary(
+                    incomeCents = c.getLong(c.getColumnIndexOrThrow("income_sum")),
+                    expenseCents = c.getLong(c.getColumnIndexOrThrow("expense_sum"))
+                )
+            } else {
+                BalanceSummary()
+            }
+        }
+    }
+
+    private fun queryCategories(): List<CategoryEntity> {
+        val cursor = dbHelper.readableDatabase.query(
+            "categories",
+            arrayOf("id", "parent", "child"),
+            null,
+            null,
+            null,
+            null,
+            "parent ASC, child ASC"
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        CategoryEntity(
+                            id = c.getLong(c.getColumnIndexOrThrow("id")),
+                            parent = c.getString(c.getColumnIndexOrThrow("parent")),
+                            child = c.getString(c.getColumnIndexOrThrow("child"))
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun queryMonthBudget(monthKey: String): MonthlyBudgetEntity? {
+        val cursor = dbHelper.readableDatabase.query(
+            "monthly_budget",
+            arrayOf("month_key", "limit_cents"),
+            "month_key = ?",
+            arrayOf(monthKey),
+            null,
+            null,
+            null,
+            "1"
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) {
+                MonthlyBudgetEntity(
+                    monthKey = c.getString(c.getColumnIndexOrThrow("month_key")),
+                    limitCents = c.getLong(c.getColumnIndexOrThrow("limit_cents"))
+                )
+            } else {
+                null
+            }
+        }
+    }
+
+    private fun buildTransactions(cursor: android.database.Cursor): List<TransactionEntity> {
         return buildList {
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
+            while (cursor.moveToNext()) {
                 add(
                     TransactionEntity(
-                        id = obj.optLong("id"),
-                        amountCents = obj.optLong("amountCents"),
-                        type = obj.optString("type"),
-                        parentCategory = obj.optString("parentCategory"),
-                        childCategory = obj.optString("childCategory"),
-                        source = obj.optString("source"),
-                        note = obj.optString("note"),
-                        occurredAtEpochMs = obj.optLong("occurredAtEpochMs"),
-                        createdAtEpochMs = obj.optLong("createdAtEpochMs")
+                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+                        amountCents = cursor.getLong(cursor.getColumnIndexOrThrow("amount_cents")),
+                        type = cursor.getString(cursor.getColumnIndexOrThrow("type")),
+                        parentCategory = cursor.getString(cursor.getColumnIndexOrThrow("parent_category")),
+                        childCategory = cursor.getString(cursor.getColumnIndexOrThrow("child_category")),
+                        source = cursor.getString(cursor.getColumnIndexOrThrow("source")),
+                        note = cursor.getString(cursor.getColumnIndexOrThrow("note")),
+                        occurredAtEpochMs = cursor.getLong(cursor.getColumnIndexOrThrow("occurred_at_epoch_ms")),
+                        createdAtEpochMs = cursor.getLong(cursor.getColumnIndexOrThrow("created_at_epoch_ms")),
+                        status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
+                        fingerprint = cursor.getString(cursor.getColumnIndexOrThrow("fingerprint"))
                     )
                 )
             }
         }
-    }
-
-    private fun saveCategories(items: List<CategoryEntity>) {
-        val arr = JSONArray()
-        items.forEach {
-            arr.put(JSONObject().put("id", it.id).put("parent", it.parent).put("child", it.child))
-        }
-        prefs.edit().putString(KEY_CATEGORIES, arr.toString()).apply()
-    }
-
-    private fun loadCategories(): List<CategoryEntity> {
-        val raw = prefs.getString(KEY_CATEGORIES, null) ?: return emptyList()
-        val arr = JSONArray(raw)
-        return buildList {
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                add(
-                    CategoryEntity(
-                        id = obj.optLong("id"),
-                        parent = obj.optString("parent"),
-                        child = obj.optString("child")
-                    )
-                )
-            }
-        }
-    }
-
-    private fun saveBudgets(items: Map<String, Long>) {
-        val obj = JSONObject()
-        items.forEach { (k, v) -> obj.put(k, v) }
-        prefs.edit().putString(KEY_BUDGETS, obj.toString()).apply()
-    }
-
-    private fun loadBudgets(): Map<String, Long> {
-        val raw = prefs.getString(KEY_BUDGETS, null) ?: return emptyMap()
-        val obj = JSONObject(raw)
-        val keys = obj.keys()
-        val map = mutableMapOf<String, Long>()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            map[key] = obj.optLong(key)
-        }
-        return map
-    }
-
-    companion object {
-        private const val PREF_NAME = "coin_nest_prefs"
-        private const val KEY_TXS = "transactions_json"
-        private const val KEY_CATEGORIES = "categories_json"
-        private const val KEY_BUDGETS = "budgets_json"
     }
 }
-
