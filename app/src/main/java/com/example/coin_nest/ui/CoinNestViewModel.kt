@@ -59,7 +59,7 @@ class CoinNestViewModel(
 
     val uiState: StateFlow<HomeUiState> = combine(
         summaryAndCategoryFlow,
-        repository.observeRecentTransactions()
+        repository.observeRecentTransactions(limit = 500)
     ) { summary, txs ->
         HomeUiState(
             daily = summary.daily,
@@ -123,4 +123,3 @@ class CoinNestViewModelFactory(
         return CoinNestViewModel(repository) as T
     }
 }
-
