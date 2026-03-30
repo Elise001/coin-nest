@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">coin-nest</string>
+    <string name="app_name">Coin Nest</string>
+    <string name="notification_service_label">Coin Nest 自动记账监听</string>
 </resources>
