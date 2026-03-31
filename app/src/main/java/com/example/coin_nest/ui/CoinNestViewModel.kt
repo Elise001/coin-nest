@@ -10,9 +10,13 @@ import com.example.coin_nest.data.model.CategoryItem
 import com.example.coin_nest.data.model.TransactionInput
 import com.example.coin_nest.data.model.TransactionType
 import com.example.coin_nest.util.DateRangeUtils
+import java.time.YearMonth
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -20,10 +24,13 @@ data class HomeUiState(
     val daily: BalanceSummary = BalanceSummary(),
     val monthly: BalanceSummary = BalanceSummary(),
     val yearly: BalanceSummary = BalanceSummary(),
+    val selectedMonth: YearMonth = YearMonth.now(),
+    val selectedMonthSummary: BalanceSummary = BalanceSummary(),
     val monthBudgetCents: Long? = null,
     val categories: List<CategoryItem> = emptyList(),
-    val transactions: List<TransactionEntity> = emptyList(),
-    val pendingAutoTransactions: List<TransactionEntity> = emptyList()
+    val todayTransactions: List<TransactionEntity> = emptyList(),
+    val monthTransactions: List<TransactionEntity> = emptyList(),
+    val yearTransactions: List<TransactionEntity> = emptyList()
 )
 
 private data class SummaryAndCategory(
@@ -34,6 +41,13 @@ private data class SummaryAndCategory(
     val categories: List<CategoryItem>
 )
 
+private data class SelectedMonthData(
+    val month: YearMonth,
+    val summary: BalanceSummary,
+    val transactions: List<TransactionEntity>
+)
+
+@OptIn(ExperimentalCoroutinesApi::class)
 class CoinNestViewModel(
     private val repository: CoinNestRepository
 ) : ViewModel() {
@@ -41,6 +55,7 @@ class CoinNestViewModel(
     private val monthRange = DateRangeUtils.monthRange()
     private val yearRange = DateRangeUtils.yearRange()
     private val monthKey = DateRangeUtils.currentMonthKey()
+    private val selectedMonthFlow = MutableStateFlow(YearMonth.now())
 
     private val summaryAndCategoryFlow = combine(
         repository.observeSummary(dayRange.first, dayRange.last + 1),
@@ -58,19 +73,45 @@ class CoinNestViewModel(
         )
     }
 
+    private val selectedMonthSummaryFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val range = DateRangeUtils.monthRange(ym)
+        repository.observeSummary(range.first, range.last + 1)
+    }
+
+    private val selectedMonthTransactionsFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val range = DateRangeUtils.monthRange(ym)
+        repository.observeTransactionsInRange(range.first, range.last + 1, limit = 4000)
+    }
+
+    private val selectedMonthDataFlow = combine(
+        selectedMonthFlow,
+        selectedMonthSummaryFlow,
+        selectedMonthTransactionsFlow
+    ) { month, summary, transactions ->
+        SelectedMonthData(
+            month = month,
+            summary = summary,
+            transactions = transactions
+        )
+    }
+
     val uiState: StateFlow<HomeUiState> = combine(
         summaryAndCategoryFlow,
-        repository.observeRecentTransactions(limit = 300),
-        repository.observePendingAutoTransactions(limit = 80)
-    ) { summary, txs, pending ->
+        repository.observeTransactionsInRange(dayRange.first, dayRange.last + 1, limit = 200),
+        repository.observeTransactionsInRange(yearRange.first, yearRange.last + 1, limit = 12000),
+        selectedMonthDataFlow
+    ) { summary, todayTxs, yearTxs, selectedMonthData ->
         HomeUiState(
             daily = summary.daily,
             monthly = summary.monthly,
             yearly = summary.yearly,
+            selectedMonth = selectedMonthData.month,
+            selectedMonthSummary = selectedMonthData.summary,
             monthBudgetCents = summary.monthBudgetCents,
             categories = summary.categories,
-            transactions = txs,
-            pendingAutoTransactions = pending
+            todayTransactions = todayTxs,
+            monthTransactions = selectedMonthData.transactions,
+            yearTransactions = yearTxs
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -104,19 +145,6 @@ class CoinNestViewModel(
         }
     }
 
-    fun confirmPendingAuto(id: Long, parentCategory: String, childCategory: String) {
-        if (parentCategory.isBlank() || childCategory.isBlank()) return
-        viewModelScope.launch {
-            repository.confirmPendingTransaction(id, parentCategory, childCategory)
-        }
-    }
-
-    fun ignorePendingAuto(id: Long) {
-        viewModelScope.launch {
-            repository.ignorePendingTransaction(id)
-        }
-    }
-
     fun addCategory(parent: String, child: String) {
         if (parent.isBlank() || child.isBlank()) return
         viewModelScope.launch { repository.addCategory(parent, child) }
@@ -128,6 +156,10 @@ class CoinNestViewModel(
         viewModelScope.launch {
             repository.upsertMonthBudget(monthKey, (amount * 100).toLong())
         }
+    }
+
+    fun selectMonth(month: YearMonth) {
+        selectedMonthFlow.value = month
     }
 }
 

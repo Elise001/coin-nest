@@ -1,10 +1,11 @@
-package com.example.coin_nest.ui
+﻿package com.example.coin_nest.ui
 
 import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -33,8 +35,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,32 +46,31 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.util.MoneyFormat
-import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Date
-import java.util.Locale
 
-private enum class HomeTab(val title: String) {
-    Overview("\u6982\u89c8"),
-    Record("\u8bb0\u8d26"),
-    Settings("\u8bbe\u7f6e")
+private enum class MainTab(val title: String) {
+    Overview("概览"),
+    Record("记账"),
+    Settings("设置")
 }
 
-private enum class OverviewMode {
-    Daily,
-    Monthly,
-    Yearly
+private enum class OverviewTabMode(val title: String) {
+    Daily("日"),
+    Monthly("月"),
+    Yearly("年")
 }
 
 private data class DayAmountSummary(
@@ -81,219 +80,296 @@ private data class DayAmountSummary(
     val balanceCents: Long get() = incomeCents - expenseCents
 }
 
+private data class TrendPoint(val label: String, val expenseCents: Long)
+
+private data class CategoryShare(
+    val name: String,
+    val amountCents: Long,
+    val ratio: Float
+)
+
 private val zone: ZoneId = ZoneId.systemDefault()
+private val rowTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
 
 @Composable
 fun HomeScreen(
     state: HomeUiState,
     onAddTransaction: (String, Boolean, String, String, String) -> Unit,
-    onConfirmPendingAuto: (Long, String, String) -> Unit,
-    onIgnorePendingAuto: (Long) -> Unit,
     onAddCategory: (String, String) -> Unit,
+    onSelectMonth: (YearMonth) -> Unit,
     onSetMonthBudget: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = remember { HomeTab.entries }
+    var selectedMainTab by rememberSaveable { mutableIntStateOf(0) }
+    val mainTabs = remember { MainTab.entries }
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(Color(0xFF09111F), Color(0xFF121D2E), Color(0xFF0E1624))
-                )
-            )
+            .background(Color(0xFFFFF7EA))
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Text(
-                text = "Coin Nest",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp)
-            )
-            Text(
-                text = "\u4e2a\u4eba\u8bb0\u8d26\u4e0e\u9884\u7b97",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            TabRow(selectedTabIndex = selectedTab, containerColor = Color.Transparent) {
-                tabs.forEachIndexed { index, tab ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = { Text(tab.title) }
-                    )
-                }
-            }
-            when (tabs[selectedTab]) {
-                HomeTab.Overview -> OverviewTab(state)
-                HomeTab.Record -> RecordTab(
-                    state = state,
-                    onAddTransaction = onAddTransaction,
-                    onConfirmPendingAuto = onConfirmPendingAuto,
-                    onIgnorePendingAuto = onIgnorePendingAuto
-                )
-                HomeTab.Settings -> SettingsTab(state, onAddCategory, onSetMonthBudget)
+        Text(
+            text = "Coin Nest",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+        )
+        Text(
+            text = "个人记账与预算",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        TopMainTabs(
+            tabs = mainTabs,
+            selectedIndex = selectedMainTab,
+            onSelect = { selectedMainTab = it }
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Box(modifier = Modifier.weight(1f)) {
+            when (mainTabs[selectedMainTab]) {
+                MainTab.Overview -> OverviewScreen(state, onSelectMonth)
+                MainTab.Record -> RecordTab(state, onAddTransaction)
+                MainTab.Settings -> SettingsTab(state, onAddCategory, onSetMonthBudget)
             }
         }
     }
 }
 
 @Composable
-private fun OverviewTab(state: HomeUiState) {
-    var mode by rememberSaveable { mutableStateOf(OverviewMode.Daily) }
-    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
-    var focusMonth by remember { mutableStateOf(YearMonth.now()) }
-    val currentYear = LocalDate.now().year
+private fun TopMainTabs(
+    tabs: List<MainTab>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFFE8CA))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        tabs.forEachIndexed { index, tab ->
+            val selected = index == selectedIndex
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (selected) Color(0xFFD77D33) else Color.Transparent)
+                    .clickable { onSelect(index) }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = tab.title,
+                    color = if (selected) Color.White else Color(0xFF6F4D34),
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                )
+            }
+        }
+    }
+}
 
-    val monthTransactions = remember(state.transactions, focusMonth) {
-        state.transactions.filter { tx ->
-            val date = Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).toLocalDate()
-            date.year == focusMonth.year && date.month == focusMonth.month
-        }
-    }
-    val monthByDate = remember(monthTransactions) {
-        monthTransactions.groupBy { tx ->
-            Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).toLocalDate()
-        }
-    }
-    val monthDailySummary = remember(monthByDate) { calculateDaySummary(monthByDate) }
-    val yearMonthlySummary = remember(state.transactions, currentYear) { calculateYearMonthSummary(state.transactions, currentYear) }
-    val months = remember(currentYear) { (1..12).map { YearMonth.of(currentYear, it) } }
+@Composable
+private fun OverviewScreen(state: HomeUiState, onSelectMonth: (YearMonth) -> Unit) {
+    var mode by rememberSaveable { mutableStateOf(OverviewTabMode.Daily) }
+    var showMonthCalendar by rememberSaveable { mutableStateOf(false) }
+    var selectedDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
+    val selectedMonth = state.selectedMonth
 
-    LaunchedEffect(focusMonth) {
-        if (selectedDate.year != focusMonth.year || selectedDate.month != focusMonth.month) {
-            selectedDate = LocalDate.of(focusMonth.year, focusMonth.month, 1)
-        }
+    val todayTransactions = state.todayTransactions
+    val monthTransactions = state.monthTransactions
+    val yearTransactions = state.yearTransactions
+
+    val monthDailyTrend = remember(mode, showMonthCalendar, monthTransactions) {
+        if (mode != OverviewTabMode.Monthly || showMonthCalendar) emptyList()
+        else buildMonthTrend(monthTransactions, selectedMonth)
     }
+    val monthCategoryShare = remember(mode, showMonthCalendar, monthTransactions) {
+        if (mode != OverviewTabMode.Monthly || showMonthCalendar) emptyList()
+        else buildCategoryShare(monthTransactions)
+    }
+    val yearMonthlyTrend = remember(mode, yearTransactions) {
+        if (mode != OverviewTabMode.Yearly) emptyList() else buildYearTrend(yearTransactions)
+    }
+    val yearCategoryShare = remember(mode, yearTransactions) {
+        if (mode != OverviewTabMode.Yearly) emptyList() else buildCategoryShare(yearTransactions)
+    }
+
+    val monthByDate = remember(showMonthCalendar, monthTransactions) {
+        if (!showMonthCalendar) emptyMap()
+        else monthTransactions.groupBy { Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).toLocalDate() }
+    }
+    val monthDaySummary = remember(monthByDate) { calculateDaySummary(monthByDate) }
+    val selectedDayTransactions = remember(monthByDate, selectedDate) {
+        monthByDate[selectedDate].orEmpty().sortedByDescending { it.occurredAtEpochMs }
+    }
+
+    val listState = rememberLazyListState()
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+        state = listState,
+        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            SummaryCard(
-                title = "\u672c\u6708",
-                income = state.monthly.incomeCents,
-                expense = state.monthly.expenseCents,
-                balance = state.monthly.balanceCents,
-                highlight = true,
-                onClick = {
-                    focusMonth = YearMonth.now()
-                    mode = OverviewMode.Monthly
+        item { OverviewModeSwitch(mode = mode, onModeChange = { mode = it; if (it != OverviewTabMode.Monthly) showMonthCalendar = false }) }
+
+        when (mode) {
+            OverviewTabMode.Daily -> {
+                item { SummaryCard("当日", state.daily.incomeCents, state.daily.expenseCents, state.daily.balanceCents, highlight = true) }
+                if (state.monthBudgetCents != null && state.monthBudgetCents > 0) {
+                    item { BudgetProgressCard(expense = state.monthly.expenseCents, budget = state.monthBudgetCents) }
                 }
-            )
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Box(modifier = Modifier.weight(1f)) {
-                    SummaryCard(
-                        title = "\u4eca\u65e5",
-                        income = state.daily.incomeCents,
-                        expense = state.daily.expenseCents,
-                        balance = state.daily.balanceCents,
-                        onClick = { mode = OverviewMode.Daily }
+                item { Text("今日流水", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
+                if (todayTransactions.isEmpty()) item { GlassCard { Text("今天暂无流水") } }
+                else items(todayTransactions, key = { it.id }, contentType = { "tx_row" }) { tx -> TransactionRow(tx) }
+            }
+
+            OverviewTabMode.Monthly -> {
+                item {
+                    MonthSwitcher(
+                        month = selectedMonth,
+                        onPrev = {
+                            onSelectMonth(selectedMonth.minusMonths(1))
+                            showMonthCalendar = false
+                        },
+                        onNext = {
+                            onSelectMonth(selectedMonth.plusMonths(1))
+                            showMonthCalendar = false
+                        }
                     )
                 }
-                Box(modifier = Modifier.weight(1f)) {
+                item {
                     SummaryCard(
-                        title = "\u672c\u5e74",
+                        title = "${selectedMonth.year}年${selectedMonth.monthValue}月",
+                        income = state.selectedMonthSummary.incomeCents,
+                        expense = state.selectedMonthSummary.expenseCents,
+                        balance = state.selectedMonthSummary.balanceCents,
+                        highlight = true,
+                        onClick = {
+                            showMonthCalendar = true
+                            selectedDate = LocalDate.now().takeIf { YearMonth.from(it) == selectedMonth } ?: selectedMonth.atDay(1)
+                        }
+                    )
+                }
+                if (showMonthCalendar) {
+                    item { GlassCard { Text("返回月概览", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { showMonthCalendar = false }) } }
+                    item { MonthCalendarCard(month = selectedMonth, selectedDate = selectedDate, dailySummary = monthDaySummary, onSelectDate = { selectedDate = it }) }
+                    item { Text("${selectedDate.format(DateTimeFormatter.ofPattern("MM-dd"))} 流水", fontWeight = FontWeight.SemiBold) }
+                    if (selectedDayTransactions.isEmpty()) item { GlassCard { Text("当天暂无流水") } }
+                    else items(selectedDayTransactions, key = { it.id }, contentType = { "tx_row" }) { tx -> TransactionRow(tx) }
+                } else {
+                    item { TrendChartCard("月内支出趋势", monthDailyTrend) }
+                    item { CategoryShareCard("月支出分类", monthCategoryShare) }
+                }
+            }
+
+            OverviewTabMode.Yearly -> {
+                item {
+                    SummaryCard(
+                        title = "当年",
                         income = state.yearly.incomeCents,
                         expense = state.yearly.expenseCents,
                         balance = state.yearly.balanceCents,
-                        onClick = { mode = OverviewMode.Yearly }
+                        highlight = true,
+                        onClick = { mode = OverviewTabMode.Monthly; showMonthCalendar = false }
                     )
                 }
+                item { TrendChartCard("年内支出趋势", yearMonthlyTrend) }
+                item { CategoryShareCard("年支出分类", yearCategoryShare) }
             }
         }
-        if (state.monthBudgetCents != null && state.monthBudgetCents > 0) {
-            item { BudgetProgressCard(expense = state.monthly.expenseCents, budget = state.monthBudgetCents) }
+    }
+}
+
+@Composable
+private fun OverviewModeSwitch(mode: OverviewTabMode, onModeChange: (OverviewTabMode) -> Unit) {
+    val options = remember { OverviewTabMode.entries }
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFFFFE4C6)).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        options.forEach { item ->
+            val selected = item == mode
+            Box(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (selected) Color(0xFFB9652E) else Color.Transparent).clickable { onModeChange(item) }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = item.title, color = if (selected) Color.White else Color(0xFF6D4B2F), fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+            }
         }
-        when (mode) {
-            OverviewMode.Daily -> {
-                item {
-                    Text(
-                        text = "\u6700\u8fd1\u6d41\u6c34",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                val latest = state.transactions.take(20)
-                if (latest.isEmpty()) {
-                    item { GlassCard { Text("\u6682\u65e0\u8bb0\u5f55") } }
-                } else {
-                    items(latest, key = { it.id }) { tx -> TransactionRow(tx) }
-                }
+    }
+}
+
+@Composable
+private fun MonthSwitcher(
+    month: YearMonth,
+    onPrev: () -> Unit,
+    onNext: () -> Unit
+) {
+    GlassCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("上月", modifier = Modifier.clickable { onPrev() }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${month.year}年${month.monthValue}月", fontWeight = FontWeight.SemiBold)
+            Text("下月", modifier = Modifier.clickable { onNext() }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun TrendChartCard(title: String, points: List<TrendPoint>) {
+    GlassCard {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(8.dp))
+        if (points.isEmpty()) {
+            Text("暂无数据")
+            return@GlassCard
+        }
+        val max = points.maxOf { it.expenseCents }.coerceAtLeast(1L)
+        Canvas(
+            modifier = Modifier.fillMaxWidth().height(120.dp).background(Color(0xFFFFE8CC), RoundedCornerShape(10.dp)).padding(horizontal = 4.dp, vertical = 8.dp)
+        ) {
+            val barWidth = size.width / points.size
+            points.forEachIndexed { index, point ->
+                val ratio = point.expenseCents.toFloat() / max.toFloat()
+                val h = size.height * ratio
+                drawRect(
+                    color = Color(0xFFE58E42),
+                    topLeft = Offset(index * barWidth + barWidth * 0.2f, size.height - h),
+                    size = Size(barWidth * 0.6f, h)
+                )
             }
-            OverviewMode.Monthly -> {
-                item {
-                    HeaderWithBack(
-                        title = "${focusMonth.year}\u5e74${focusMonth.monthValue}\u6708\u65e5\u5386",
-                        onBack = { mode = OverviewMode.Daily }
-                    )
-                }
-                item {
-                    MonthCalendarCard(
-                        month = focusMonth,
-                        selectedDate = selectedDate,
-                        dailySummary = monthDailySummary,
-                        onSelectDate = { selectedDate = it }
-                    )
-                }
-                item {
-                    val formatter = DateTimeFormatter.ofPattern("MM-dd")
-                    Text(
-                        text = "${selectedDate.format(formatter)} \u6536\u652f\u660e\u7ec6",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                val selectedList = monthByDate[selectedDate].orEmpty().sortedByDescending { it.occurredAtEpochMs }
-                if (selectedList.isEmpty()) {
-                    item { GlassCard { Text("\u5f53\u5929\u6682\u65e0\u6d41\u6c34") } }
-                } else {
-                    items(selectedList, key = { it.id }) { tx -> TransactionRow(tx) }
-                }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = formatTrendRange(points.first().label, points.last().label),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun CategoryShareCard(title: String, shares: List<CategoryShare>) {
+    GlassCard {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(8.dp))
+        if (shares.isEmpty()) {
+            Text("暂无分类数据")
+            return@GlassCard
+        }
+        shares.take(5).forEach { item ->
+            Text("${item.name}  ${MoneyFormat.fromCents(item.amountCents)}  ${(item.ratio * 100).toInt()}%")
+            Spacer(modifier = Modifier.height(4.dp))
+            Box(modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFF5D5AE))) {
+                Box(modifier = Modifier.fillMaxWidth(item.ratio.coerceIn(0f, 1f)).height(8.dp).background(Color(0xFFDB7E36)))
             }
-            OverviewMode.Yearly -> {
-                item {
-                    HeaderWithBack(
-                        title = "${currentYear}\u5e74\u6708\u5ea6\u660e\u7ec6",
-                        onBack = { mode = OverviewMode.Daily }
-                    )
-                }
-                items(months, key = { it.toString() }) { ym ->
-                    val summary = yearMonthlySummary[ym] ?: DayAmountSummary()
-                    GlassCard {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("${ym.monthValue}\u6708", fontWeight = FontWeight.SemiBold)
-                            Text("\u6536\u5165 ${MoneyFormat.fromCents(summary.incomeCents)}")
-                            Text("\u652f\u51fa ${MoneyFormat.fromCents(summary.expenseCents)}")
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("\u7ed3\u4f59 ${MoneyFormat.fromCents(summary.balanceCents)}")
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "\u70b9\u51fb\u67e5\u770b\u8be5\u6708\u65e5\u5386",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.clickable {
-                                focusMonth = ym
-                                mode = OverviewMode.Monthly
-                            }
-                        )
-                    }
-                }
-            }
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
@@ -302,9 +378,7 @@ private fun OverviewTab(state: HomeUiState) {
 @Composable
 private fun RecordTab(
     state: HomeUiState,
-    onAddTransaction: (String, Boolean, String, String, String) -> Unit,
-    onConfirmPendingAuto: (Long, String, String) -> Unit,
-    onIgnorePendingAuto: (Long) -> Unit
+    onAddTransaction: (String, Boolean, String, String, String) -> Unit
 ) {
     val context = LocalContext.current
     var amount by remember { mutableStateOf("") }
@@ -318,179 +392,54 @@ private fun RecordTab(
     val grouped = remember(state.categories) { state.categories.groupBy { it.parent } }
     val parentOptions = remember(grouped, isIncome) {
         val keys = grouped.keys.toList().sorted()
-        if (isIncome) keys.filter { it == "\u6536\u5165" }.ifEmpty { keys }
-        else keys.filter { it != "\u6536\u5165" }.ifEmpty { keys }
+        if (isIncome) keys.filter { it == "收入" }.ifEmpty { keys } else keys.filter { it != "收入" }.ifEmpty { keys }
     }
-    val childOptions = remember(parentCategory, grouped) {
-        grouped[parentCategory].orEmpty().map { it.child }.distinct().sorted()
-    }
+    val childOptions = remember(parentCategory, grouped) { grouped[parentCategory].orEmpty().map { it.child }.distinct().sorted() }
 
-    LaunchedEffect(parentOptions) {
-        if (parentCategory !in parentOptions) parentCategory = parentOptions.firstOrNull().orEmpty()
-    }
-    LaunchedEffect(childOptions) {
-        if (childCategory !in childOptions) childCategory = childOptions.firstOrNull().orEmpty()
-    }
+    LaunchedEffect(parentOptions) { if (parentCategory !in parentOptions) parentCategory = parentOptions.firstOrNull().orEmpty() }
+    LaunchedEffect(childOptions) { if (childCategory !in childOptions) childCategory = childOptions.firstOrNull().orEmpty() }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        if (state.pendingAutoTransactions.isNotEmpty()) {
-            item {
-                GlassCard {
-                    Text("\u5f85\u786e\u8ba4\u81ea\u52a8\u8bb0\u5f55", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "\u901a\u77e5\u5df2\u81ea\u52a8\u8bc6\u522b\uff0c\u8bf7\u6309\u5f53\u524d\u5206\u7c7b\u786e\u8ba4\u6216\u5ffd\u7565\u3002",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            items(state.pendingAutoTransactions.take(20), key = { it.id }) { pending ->
-                GlassCard {
-                    Text(
-                        text = "-${MoneyFormat.fromCents(pending.amountCents)}  ${pending.source}",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = pending.note,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                onConfirmPendingAuto(pending.id, parentCategory, childCategory)
-                                Toast.makeText(context, "\u5df2\u786e\u8ba4\u5165\u8d26", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("\u6309\u5f53\u524d\u5206\u7c7b\u786e\u8ba4")
-                        }
-                        Button(
-                            onClick = { onIgnorePendingAuto(pending.id) },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("\u5ffd\u7565")
-                        }
-                    }
-                }
-            }
-        }
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             GlassCard {
-                Text("\u5feb\u901f\u8bb0\u8d26", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("快速记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (isIncome) "\u6536\u5165" else "\u652f\u51fa")
+                    Text(if (isIncome) "收入" else "支出")
                     Spacer(modifier = Modifier.width(8.dp))
                     Switch(checked = isIncome, onCheckedChange = { isIncome = it })
                 }
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = amount,
-                    onValueChange = { amount = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("\u91d1\u989d\uff08\u5143\uff09") },
-                    singleLine = true
-                )
+                OutlinedTextField(value = amount, onValueChange = { amount = it }, modifier = Modifier.fillMaxWidth(), label = { Text("金额（元）") }, singleLine = true)
                 Spacer(modifier = Modifier.height(8.dp))
-                ExposedDropdownMenuBox(
-                    expanded = parentExpanded,
-                    onExpandedChange = { parentExpanded = !parentExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = parentCategory,
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(),
-                        label = { Text("\u4e00\u7ea7\u5206\u7c7b") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = parentExpanded) }
-                    )
+                ExposedDropdownMenuBox(expanded = parentExpanded, onExpandedChange = { parentExpanded = !parentExpanded }) {
+                    OutlinedTextField(value = parentCategory, onValueChange = {}, readOnly = true, modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(), label = { Text("一级分类") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = parentExpanded) })
                     ExposedDropdownMenu(expanded = parentExpanded, onDismissRequest = { parentExpanded = false }) {
-                        parentOptions.forEach { item ->
-                            DropdownMenuItem(
-                                text = { Text(item) },
-                                onClick = {
-                                    parentCategory = item
-                                    childCategory = grouped[item]?.firstOrNull()?.child.orEmpty()
-                                    parentExpanded = false
-                                }
-                            )
-                        }
+                        parentOptions.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { parentCategory = item; childCategory = grouped[item]?.firstOrNull()?.child.orEmpty(); parentExpanded = false }) }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                ExposedDropdownMenuBox(
-                    expanded = childExpanded,
-                    onExpandedChange = { childExpanded = !childExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = childCategory,
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(),
-                        label = { Text("\u4e8c\u7ea7\u5206\u7c7b") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = childExpanded) }
-                    )
+                ExposedDropdownMenuBox(expanded = childExpanded, onExpandedChange = { childExpanded = !childExpanded }) {
+                    OutlinedTextField(value = childCategory, onValueChange = {}, readOnly = true, modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(), label = { Text("二级分类") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = childExpanded) })
                     ExposedDropdownMenu(expanded = childExpanded, onDismissRequest = { childExpanded = false }) {
-                        childOptions.forEach { item ->
-                            DropdownMenuItem(
-                                text = { Text(item) },
-                                onClick = {
-                                    childCategory = item
-                                    childExpanded = false
-                                }
-                            )
-                        }
+                        childOptions.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { childCategory = item; childExpanded = false }) }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("\u5907\u6ce8\uff08\u53ef\u9009\uff09") },
-                    maxLines = 2
-                )
+                OutlinedTextField(value = note, onValueChange = { note = it }, modifier = Modifier.fillMaxWidth(), label = { Text("备注（可选）") }, maxLines = 2)
                 Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        val parsedAmount = amount.toDoubleOrNull()
-                        if (parsedAmount == null || parsedAmount <= 0.0) {
-                            Toast.makeText(context, "\u8bf7\u8f93\u5165\u6b63\u786e\u91d1\u989d", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        if (parentCategory.isBlank() || childCategory.isBlank()) {
-                            Toast.makeText(context, "\u8bf7\u9009\u62e9\u5206\u7c7b", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        onAddTransaction(amount, isIncome, parentCategory, childCategory, note)
-                        amount = ""
-                        note = ""
-                        Toast.makeText(context, "\u4fdd\u5b58\u6210\u529f", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("\u4fdd\u5b58\u8bb0\u5f55")
-                }
-            }
-        }
-        item {
-            GlassCard {
-                Text("\u5df2\u914d\u7f6e\u5206\u7c7b", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = if (state.categories.isEmpty()) "\u6682\u65e0\u5206\u7c7b"
-                    else state.categories.joinToString("\u3001") { "${it.parent}/${it.child}" },
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Button(onClick = {
+                    val parsedAmount = amount.toDoubleOrNull()
+                    if (parsedAmount == null || parsedAmount <= 0.0) {
+                        Toast.makeText(context, "请输入正确金额", Toast.LENGTH_SHORT).show(); return@Button
+                    }
+                    if (parentCategory.isBlank() || childCategory.isBlank()) {
+                        Toast.makeText(context, "请选择分类", Toast.LENGTH_SHORT).show(); return@Button
+                    }
+                    onAddTransaction(amount, isIncome, parentCategory, childCategory, note)
+                    amount = ""; note = ""
+                    Toast.makeText(context, "保存成功", Toast.LENGTH_SHORT).show()
+                }, modifier = Modifier.fillMaxWidth()) { Text("保存记录") }
             }
         }
     }
@@ -507,117 +456,50 @@ private fun SettingsTab(
     var newParent by remember { mutableStateOf("") }
     var newChild by remember { mutableStateOf("") }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             GlassCard {
-                Text("\u81ea\u52a8\u8bb0\u8d26", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("自动记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "\u901a\u8fc7\u76d1\u542c\u5fae\u4fe1/\u652f\u4ed8\u5b9d\u901a\u77e5\u81ea\u52a8\u63d0\u53d6\u6d88\u8d39\u91d1\u989d\u3002",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Text("通过监听微信/支付宝通知自动提取消费金额，并在通知栏直接确认/取消。")
                 Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("\u6253\u5f00\u901a\u77e5\u76d1\u542c\u6743\u9650")
-                }
+                Button(onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }, modifier = Modifier.fillMaxWidth()) { Text("打开通知监听权限") }
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        try {
-                            val pm = context.getSystemService(PowerManager::class.java)
-                            if (pm != null && !pm.isIgnoringBatteryOptimizations(context.packageName)) {
-                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = Uri.parse("package:${context.packageName}")
-                                }
-                                context.startActivity(intent)
-                            } else {
-                                Toast.makeText(context, "\u5df2\u7ecf\u5ffd\u7565\u7535\u6c60\u4f18\u5316", Toast.LENGTH_SHORT).show()
-                            }
-                        } catch (_: Exception) {
-                            Toast.makeText(context, "\u6253\u5f00\u5931\u8d25", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("\u5141\u8bb8\u540e\u53f0\u4fdd\u6d3b\uff08\u53ef\u9009\uff09")
-                }
+                Button(onClick = {
+                    try {
+                        val pm = context.getSystemService(PowerManager::class.java)
+                        if (pm != null && !pm.isIgnoringBatteryOptimizations(context.packageName)) {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${context.packageName}") }
+                            context.startActivity(intent)
+                        } else Toast.makeText(context, "已经忽略电池优化", Toast.LENGTH_SHORT).show()
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "打开失败", Toast.LENGTH_SHORT).show()
+                    }
+                }, modifier = Modifier.fillMaxWidth()) { Text("允许后台保活（可选）") }
             }
         }
         item {
             GlassCard {
-                Text("\u9884\u7b97\u8bbe\u7f6e", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("预算设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "\u5f53\u524d\u9884\u7b97\uff1a${state.monthBudgetCents?.let { MoneyFormat.fromCents(it) } ?: "\u672a\u8bbe\u7f6e"}",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Text("当前预算：${state.monthBudgetCents?.let { MoneyFormat.fromCents(it) } ?: "未设置"}")
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = budget,
-                    onValueChange = { budget = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("\u672c\u6708\u9884\u7b97\uff08\u5143\uff09") },
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = { onSetMonthBudget(budget) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("\u66f4\u65b0\u9884\u7b97")
-                }
+                OutlinedTextField(value = budget, onValueChange = { budget = it }, modifier = Modifier.fillMaxWidth(), label = { Text("本月预算（元）") }, singleLine = true)
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(onClick = { onSetMonthBudget(budget) }, modifier = Modifier.fillMaxWidth()) { Text("更新预算") }
             }
         }
         item {
             GlassCard {
-                Text("\u65b0\u589e\u4e8c\u7ea7\u5206\u7c7b", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("新增二级分类", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = newParent,
-                    onValueChange = { newParent = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("\u4e00\u7ea7\u5206\u7c7b") },
-                    singleLine = true
-                )
+                OutlinedTextField(value = newParent, onValueChange = { newParent = it }, modifier = Modifier.fillMaxWidth(), label = { Text("一级分类") }, singleLine = true)
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = newChild,
-                    onValueChange = { newChild = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("\u4e8c\u7ea7\u5206\u7c7b") },
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        onAddCategory(newParent, newChild)
-                        newParent = ""
-                        newChild = ""
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("\u6dfb\u52a0\u5206\u7c7b")
-                }
+                OutlinedTextField(value = newChild, onValueChange = { newChild = it }, modifier = Modifier.fillMaxWidth(), label = { Text("二级分类") }, singleLine = true)
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(onClick = { onAddCategory(newParent, newChild); newParent = ""; newChild = "" }, modifier = Modifier.fillMaxWidth()) { Text("添加分类") }
             }
         }
-    }
-}
-
-@Composable
-private fun HeaderWithBack(title: String, onBack: () -> Unit) {
-    GlassCard {
-        Text(
-            text = "\u8fd4\u56de",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.clickable { onBack() }
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -628,24 +510,22 @@ private fun SummaryCard(
     expense: Long,
     balance: Long,
     highlight: Boolean = false,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
 ) {
-    val bg = if (highlight) Brush.linearGradient(listOf(Color(0xFF143B57), Color(0xFF1E5A62)))
-    else Brush.linearGradient(listOf(Color(0xFF1C2537), Color(0xFF252F43)))
+    val bg = if (highlight) Color(0xFFFFC98A) else Color(0xFFFFE1BC)
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        modifier = if (onClick != null) Modifier.clickable { onClick() } else Modifier
+        colors = CardDefaults.cardColors(containerColor = bg),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = if (onClick != null) modifier.clickable { onClick() } else modifier
     ) {
-        Column(
-            modifier = Modifier.background(bg).padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold)
-            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
-            Text("\u6536\u5165\uff1a${MoneyFormat.fromCents(income)}")
-            Text("\u652f\u51fa\uff1a${MoneyFormat.fromCents(expense)}")
-            Text("\u7ed3\u4f59\uff1a${MoneyFormat.fromCents(balance)}", fontWeight = FontWeight.SemiBold)
+            HorizontalDivider(color = Color(0xFF7B573A).copy(alpha = 0.25f))
+            Text("收入：${MoneyFormat.fromCents(income)}")
+            Text("支出：${MoneyFormat.fromCents(expense)}")
+            Text("结余：${MoneyFormat.fromCents(balance)}", fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -655,15 +535,15 @@ private fun BudgetProgressCard(expense: Long, budget: Long) {
     val ratio = if (budget <= 0) 0f else (expense.toFloat() / budget.toFloat()).coerceAtLeast(0f)
     val percent = (ratio * 100).toInt()
     val status = when {
-        ratio >= 1f -> "\u5df2\u8d85\u989d"
-        ratio >= 0.8f -> "\u63a5\u8fd1\u4e0a\u9650"
-        else -> "\u6b63\u5e38"
+        ratio >= 1f -> "已超额"
+        ratio >= 0.8f -> "接近上限"
+        else -> "正常"
     }
     GlassCard {
-        Text("\u9884\u7b97\u8fdb\u5ea6", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text("预算进度", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(6.dp))
-        Text("\u672c\u6708\u652f\u51fa\uff1a${MoneyFormat.fromCents(expense)} / ${MoneyFormat.fromCents(budget)}")
-        Text("\u4f7f\u7528\u7387\uff1a$percent%\uff08$status\uff09")
+        Text("本月支出：${MoneyFormat.fromCents(expense)} / ${MoneyFormat.fromCents(budget)}")
+        Text("使用率：$percent%（$status）")
     }
 }
 
@@ -674,43 +554,32 @@ private fun MonthCalendarCard(
     dailySummary: Map<LocalDate, DayAmountSummary>,
     onSelectDate: (LocalDate) -> Unit
 ) {
-    val firstDay = month.atDay(1)
-    val offset = firstDay.dayOfWeek.value - 1
-    val totalDays = month.lengthOfMonth()
-    val cellCount = ((offset + totalDays + 6) / 7) * 7
-    val cells = buildList<LocalDate?> {
-        repeat(offset) { add(null) }
-        for (day in 1..totalDays) add(month.atDay(day))
-        repeat(cellCount - size) { add(null) }
+    val cells = remember(month) {
+        val firstDay = month.atDay(1)
+        val offset = firstDay.dayOfWeek.value - 1
+        val totalDays = month.lengthOfMonth()
+        val cellCount = ((offset + totalDays + 6) / 7) * 7
+        buildList<LocalDate?> {
+            repeat(offset) { add(null) }
+            for (day in 1..totalDays) add(month.atDay(day))
+            repeat(cellCount - size) { add(null) }
+        }
     }
-    val weekNames = listOf("\u4e00", "\u4e8c", "\u4e09", "\u56db", "\u4e94", "\u516d", "\u65e5")
+    val weekNames = listOf("一", "二", "三", "四", "五", "六", "日")
 
     GlassCard {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("${month.year}\u5e74${month.monthValue}\u6708", fontWeight = FontWeight.SemiBold)
-            val monthIncome = dailySummary.values.sumOf { it.incomeCents }
-            val monthExpense = dailySummary.values.sumOf { it.expenseCents }
-            Text("\u6536 ${MoneyFormat.fromCents(monthIncome)} \u652f ${MoneyFormat.fromCents(monthExpense)}")
-        }
+        Text("${month.year}年${month.monthValue}月", fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
-            weekNames.forEach { name ->
-                Text(text = name, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            weekNames.forEach { name -> Text(text = name, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Spacer(modifier = Modifier.height(6.dp))
-        for (weekIndex in 0 until cellCount step 7) {
+        for (weekIndex in cells.indices step 7) {
             Row(modifier = Modifier.fillMaxWidth()) {
                 for (i in 0..6) {
                     val date = cells[weekIndex + i]
                     val summary = date?.let { dailySummary[it] } ?: DayAmountSummary()
-                    CalendarCell(
-                        date = date,
-                        selected = date == selectedDate,
-                        summary = summary,
-                        modifier = Modifier.weight(1f),
-                        onClick = { if (date != null) onSelectDate(date) }
-                    )
+                    CalendarCell(date = date, selected = date == selectedDate, summary = summary, modifier = Modifier.weight(1f), onClick = { if (date != null) onSelectDate(date) })
                 }
             }
         }
@@ -728,26 +597,17 @@ private fun CalendarCell(
     val hasRecord = summary.incomeCents > 0 || summary.expenseCents > 0
     val cellBg = when {
         date == null -> Color.Transparent
-        selected -> Color(0xFF2FA7A1).copy(alpha = 0.35f)
-        hasRecord -> Color(0xFF2FA7A1).copy(alpha = 0.16f)
+        selected -> Color(0xFFF2B57A)
+        hasRecord -> Color(0xFFFFE5C5)
         else -> Color.Transparent
     }
     Column(
-        modifier = modifier
-            .height(58.dp)
-            .padding(2.dp)
-            .background(cellBg, RoundedCornerShape(8.dp))
-            .clickable(enabled = date != null, onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 3.dp),
+        modifier = modifier.height(54.dp).padding(2.dp).background(cellBg, RoundedCornerShape(8.dp)).clickable(enabled = date != null, onClick = onClick).padding(horizontal = 4.dp, vertical = 3.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Text(text = date?.dayOfMonth?.toString().orEmpty(), style = MaterialTheme.typography.bodySmall)
         if (date != null && hasRecord) {
-            Text(
-                text = "\u6536${(summary.incomeCents / 100)} \u652f${(summary.expenseCents / 100)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(text = "支${summary.expenseCents / 100}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             Spacer(modifier = Modifier.height(1.dp))
         }
@@ -756,59 +616,67 @@ private fun CalendarCell(
 
 @Composable
 private fun TransactionRow(tx: TransactionEntity) {
-    val formatter = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     val prefix = if (tx.type == "INCOME") "+" else "-"
-    GlassCard {
-        Text(
-            text = "$prefix${MoneyFormat.fromCents(tx.amountCents)}  ${tx.parentCategory}/${tx.childCategory}",
-            fontWeight = FontWeight.SemiBold
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text("\u6765\u6e90\uff1a${tx.source}  \u65f6\u95f4\uff1a${formatter.format(Date(tx.occurredAtEpochMs))}")
-        if (tx.note.isNotBlank()) Text("\u5907\u6ce8\uff1a${tx.note}")
+    val timeText = remember(tx.occurredAtEpochMs) { Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter) }
+    Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF2DE)), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(text = "$prefix${MoneyFormat.fromCents(tx.amountCents)}  ${tx.parentCategory}/${tx.childCategory}", fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text("来源：${tx.source}  时间：$timeText")
+            if (tx.note.isNotBlank()) Text("备注：${tx.note}", maxLines = 1)
+        }
     }
 }
 
 @Composable
 private fun GlassCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF2B3547).copy(alpha = 0.85f))
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            content = content
-        )
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF2DE)), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp), content = content)
     }
+}
+
+private fun buildMonthTrend(monthTx: List<TransactionEntity>, month: YearMonth): List<TrendPoint> {
+    if (monthTx.isEmpty()) return emptyList()
+    val expenseByDay = monthTx.asSequence().filter { it.type == "EXPENSE" }.groupBy { Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).toLocalDate().dayOfMonth }.mapValues { it.value.sumOf { tx -> tx.amountCents } }
+    val allDays = (1..month.lengthOfMonth()).toList()
+    val maxBars = 15
+    val step = kotlin.math.ceil(allDays.size / maxBars.toDouble()).toInt().coerceAtLeast(1)
+    return allDays
+        .chunked(step)
+        .map { chunk ->
+            val label = chunk.first().toString()
+            val sum = chunk.sumOf { day -> expenseByDay[day] ?: 0L }
+            TrendPoint(label = label, expenseCents = sum)
+        }
+}
+
+private fun buildYearTrend(yearTx: List<TransactionEntity>): List<TrendPoint> {
+    if (yearTx.isEmpty()) return emptyList()
+    val expenseByMonth = yearTx.asSequence().filter { it.type == "EXPENSE" }.groupBy { Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).toLocalDate().monthValue }.mapValues { it.value.sumOf { tx -> tx.amountCents } }
+    return (1..12).map { month -> TrendPoint(label = "${month}月", expenseCents = expenseByMonth[month] ?: 0L) }
+}
+
+private fun buildCategoryShare(txs: List<TransactionEntity>): List<CategoryShare> {
+    val expenseTx = txs.filter { it.type == "EXPENSE" }
+    if (expenseTx.isEmpty()) return emptyList()
+    val total = expenseTx.sumOf { it.amountCents }.coerceAtLeast(1L)
+    return expenseTx.groupBy { it.parentCategory }.map { (name, list) ->
+        val amount = list.sumOf { it.amountCents }
+        CategoryShare(name = name, amountCents = amount, ratio = amount.toFloat() / total.toFloat())
+    }.sortedByDescending { it.amountCents }
 }
 
 private fun calculateDaySummary(map: Map<LocalDate, List<TransactionEntity>>): Map<LocalDate, DayAmountSummary> {
     return map.mapValues { (_, txs) ->
         var income = 0L
         var expense = 0L
-        txs.forEach { tx ->
-            if (tx.type == "INCOME") income += tx.amountCents else expense += tx.amountCents
-        }
+        txs.forEach { tx -> if (tx.type == "INCOME") income += tx.amountCents else expense += tx.amountCents }
         DayAmountSummary(incomeCents = income, expenseCents = expense)
     }
 }
 
-private fun calculateYearMonthSummary(
-    all: List<TransactionEntity>,
-    year: Int
-): Map<YearMonth, DayAmountSummary> {
-    val grouped = all.groupBy { tx ->
-        val d = Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).toLocalDate()
-        YearMonth.of(d.year, d.month)
-    }
-    return grouped
-        .filterKeys { it.year == year }
-        .mapValues { (_, txs) ->
-            var income = 0L
-            var expense = 0L
-            txs.forEach { tx ->
-                if (tx.type == "INCOME") income += tx.amountCents else expense += tx.amountCents
-            }
-            DayAmountSummary(incomeCents = income, expenseCents = expense)
-        }
+private fun formatTrendRange(first: String, last: String): String {
+    return "$first - $last"
 }
+
+

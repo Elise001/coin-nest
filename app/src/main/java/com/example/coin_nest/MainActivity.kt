@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.Modifier
 import com.example.coin_nest.budget.BudgetNotifier
+import com.example.coin_nest.autobook.PaymentActionNotifier
 import com.example.coin_nest.di.ServiceLocator
 import com.example.coin_nest.ui.CoinNestViewModel
 import com.example.coin_nest.ui.CoinNestViewModelFactory
@@ -34,6 +35,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         ServiceLocator.init(applicationContext)
         BudgetNotifier.ensureChannel(this)
+        PaymentActionNotifier.ensureChannel(this)
         requestNotificationPermissionIfNeeded()
         enableEdgeToEdge()
         setContent {
@@ -43,9 +45,8 @@ class MainActivity : ComponentActivity() {
                     HomeScreen(
                         state = state,
                         onAddTransaction = viewModel::addTransaction,
-                        onConfirmPendingAuto = viewModel::confirmPendingAuto,
-                        onIgnorePendingAuto = viewModel::ignorePendingAuto,
                         onAddCategory = viewModel::addCategory,
+                        onSelectMonth = viewModel::selectMonth,
                         onSetMonthBudget = viewModel::setCurrentMonthBudget,
                         modifier = Modifier.padding(paddingValues)
                     )

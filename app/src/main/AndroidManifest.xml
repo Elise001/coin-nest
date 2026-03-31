@@ -38,6 +38,10 @@
         </service>
 
         <receiver
+            android:name=".autobook.PaymentActionReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".widget.BalanceWidgetReceiver"
             android:exported="true">
             <intent-filter>

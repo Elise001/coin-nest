@@ -31,6 +31,18 @@ class CoinNestRepository(context: Context) {
         }
     }
 
+    fun observeTransactionsInRange(
+        startInclusive: Long,
+        endExclusive: Long,
+        limit: Int
+    ): Flow<List<TransactionEntity>> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryTransactionsInRange(startInclusive, endExclusive, limit)
+            }
+        }
+    }
+
     fun observePendingAutoTransactions(limit: Int = 50): Flow<List<TransactionEntity>> {
         return changeTick.map {
             withContext(Dispatchers.IO) {
@@ -127,6 +139,12 @@ class CoinNestRepository(context: Context) {
         notifyChanged()
     }
 
+    suspend fun confirmPendingTransaction(id: Long) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply { put("status", STATUS_CONFIRMED) }
+        dbHelper.writableDatabase.update("transactions", values, "id = ?", arrayOf(id.toString()))
+        notifyChanged()
+    }
+
     suspend fun ignorePendingTransaction(id: Long) = withContext(Dispatchers.IO) {
         val values = ContentValues().apply { put("status", STATUS_IGNORED) }
         dbHelper.writableDatabase.update("transactions", values, "id = ?", arrayOf(id.toString()))
@@ -172,7 +190,7 @@ class CoinNestRepository(context: Context) {
         fingerprint: String,
         parent: String = "\u5f85\u5206\u7c7b",
         child: String = "\u81ea\u52a8\u8bc6\u522b"
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Long? = withContext(Dispatchers.IO) {
         val values = ContentValues().apply {
             put("amount_cents", amountCents)
             put("type", TransactionType.EXPENSE.name)
@@ -193,9 +211,9 @@ class CoinNestRepository(context: Context) {
         )
         if (insertedId != -1L) {
             notifyChanged()
-            true
+            insertedId
         } else {
-            false
+            null
         }
     }
 
@@ -255,6 +273,24 @@ class CoinNestRepository(context: Context) {
                 BalanceSummary()
             }
         }
+    }
+
+    private fun queryTransactionsInRange(
+        startInclusive: Long,
+        endExclusive: Long,
+        limit: Int
+    ): List<TransactionEntity> {
+        val cursor = dbHelper.readableDatabase.query(
+            "transactions",
+            null,
+            "occurred_at_epoch_ms >= ? AND occurred_at_epoch_ms < ? AND status = ?",
+            arrayOf(startInclusive.toString(), endExclusive.toString(), STATUS_CONFIRMED),
+            null,
+            null,
+            "occurred_at_epoch_ms DESC",
+            limit.toString()
+        )
+        return cursor.use { c -> buildTransactions(c) }
     }
 
     private fun queryCategories(): List<CategoryEntity> {

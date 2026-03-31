@@ -15,6 +15,7 @@ class PaymentNotificationListener : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         ServiceLocator.init(applicationContext)
+        PaymentActionNotifier.ensureChannel(applicationContext)
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -25,12 +26,21 @@ class PaymentNotificationListener : NotificationListenerService() {
         val text = extras?.getCharSequence("android.text")?.toString()
         val parsed = PaymentNotificationParser.parse(sbn.packageName, title, text, sbn.postTime) ?: return
         scope.launch {
-            ServiceLocator.repository().addAutoExpense(
+            val insertedId = ServiceLocator.repository().addAutoExpense(
                 amountCents = parsed.amountCents,
                 source = parsed.source,
                 note = parsed.note,
                 fingerprint = parsed.fingerprint
             )
+            if (insertedId != null) {
+                PaymentActionNotifier.notifyPendingPayment(
+                    context = applicationContext,
+                    txId = insertedId,
+                    amountCents = parsed.amountCents,
+                    source = parsed.source,
+                    note = parsed.note
+                )
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package com.example.coin_nest.util
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -24,6 +25,13 @@ object DateRangeUtils {
         return start until end
     }
 
+    fun monthRange(month: YearMonth): LongRange {
+        val first = month.atDay(1)
+        val start = first.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = first.plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        return start until end
+    }
+
     fun yearRange(nowMs: Long = System.currentTimeMillis()): LongRange {
         val date = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
         val first = LocalDate.of(date.year, 1, 1)
@@ -37,4 +45,3 @@ object DateRangeUtils {
         return date.format(monthFormatter)
     }
 }
-

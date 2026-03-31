@@ -2,12 +2,12 @@ package com.example.coin_nest.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Navy900 = Color(0xFF0B1220)
-val Navy700 = Color(0xFF162238)
-val Slate500 = Color(0xFF5E6B82)
-val Aqua500 = Color(0xFF2FA7A1)
-val Aqua300 = Color(0xFF83D8D4)
-val Coral400 = Color(0xFFF08A5D)
-val Snow = Color(0xFFF4F7FB)
-val Ink = Color(0xFF111827)
-
+val Cream50 = Color(0xFFFFF8EE)
+val Cream100 = Color(0xFFFFF0DE)
+val Sand200 = Color(0xFFF4DEC1)
+val Amber500 = Color(0xFFD88B2A)
+val Orange500 = Color(0xFFE07A3E)
+val Terracotta700 = Color(0xFF7A3B18)
+val Brown500 = Color(0xFF7A6552)
+val Ink = Color(0xFF2F2218)
+val Snow = Color(0xFFFFFCF6)
