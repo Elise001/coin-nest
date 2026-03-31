@@ -45,6 +45,8 @@ class MainActivity : ComponentActivity() {
                     HomeScreen(
                         state = state,
                         onAddTransaction = viewModel::addTransaction,
+                        onConfirmPendingAuto = viewModel::confirmPendingAutoTransaction,
+                        onIgnorePendingAuto = viewModel::ignorePendingAutoTransaction,
                         onAddCategory = viewModel::addCategory,
                         onSelectMonth = viewModel::selectMonth,
                         onSetMonthBudget = viewModel::setCurrentMonthBudget,

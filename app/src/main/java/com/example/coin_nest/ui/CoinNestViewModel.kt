@@ -26,11 +26,13 @@ data class HomeUiState(
     val yearly: BalanceSummary = BalanceSummary(),
     val selectedMonth: YearMonth = YearMonth.now(),
     val selectedMonthSummary: BalanceSummary = BalanceSummary(),
+    val previousMonthSummary: BalanceSummary = BalanceSummary(),
     val monthBudgetCents: Long? = null,
     val categories: List<CategoryItem> = emptyList(),
     val todayTransactions: List<TransactionEntity> = emptyList(),
     val monthTransactions: List<TransactionEntity> = emptyList(),
-    val yearTransactions: List<TransactionEntity> = emptyList()
+    val yearTransactions: List<TransactionEntity> = emptyList(),
+    val pendingAutoTransactions: List<TransactionEntity> = emptyList()
 )
 
 private data class SummaryAndCategory(
@@ -44,6 +46,7 @@ private data class SummaryAndCategory(
 private data class SelectedMonthData(
     val month: YearMonth,
     val summary: BalanceSummary,
+    val previousMonthSummary: BalanceSummary,
     val transactions: List<TransactionEntity>
 )
 
@@ -83,14 +86,21 @@ class CoinNestViewModel(
         repository.observeTransactionsInRange(range.first, range.last + 1, limit = 4000)
     }
 
+    private val previousMonthSummaryFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val range = DateRangeUtils.monthRange(ym.minusMonths(1))
+        repository.observeSummary(range.first, range.last + 1)
+    }
+
     private val selectedMonthDataFlow = combine(
         selectedMonthFlow,
         selectedMonthSummaryFlow,
+        previousMonthSummaryFlow,
         selectedMonthTransactionsFlow
-    ) { month, summary, transactions ->
+    ) { month, summary, previousSummary, transactions ->
         SelectedMonthData(
             month = month,
             summary = summary,
+            previousMonthSummary = previousSummary,
             transactions = transactions
         )
     }
@@ -99,19 +109,22 @@ class CoinNestViewModel(
         summaryAndCategoryFlow,
         repository.observeTransactionsInRange(dayRange.first, dayRange.last + 1, limit = 200),
         repository.observeTransactionsInRange(yearRange.first, yearRange.last + 1, limit = 12000),
-        selectedMonthDataFlow
-    ) { summary, todayTxs, yearTxs, selectedMonthData ->
+        selectedMonthDataFlow,
+        repository.observePendingAutoTransactions(limit = 100)
+    ) { summary, todayTxs, yearTxs, selectedMonthData, pendingTxs ->
         HomeUiState(
             daily = summary.daily,
             monthly = summary.monthly,
             yearly = summary.yearly,
             selectedMonth = selectedMonthData.month,
             selectedMonthSummary = selectedMonthData.summary,
+            previousMonthSummary = selectedMonthData.previousMonthSummary,
             monthBudgetCents = summary.monthBudgetCents,
             categories = summary.categories,
             todayTransactions = todayTxs,
             monthTransactions = selectedMonthData.transactions,
-            yearTransactions = yearTxs
+            yearTransactions = yearTxs,
+            pendingAutoTransactions = pendingTxs
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -160,6 +173,20 @@ class CoinNestViewModel(
 
     fun selectMonth(month: YearMonth) {
         selectedMonthFlow.value = month
+    }
+
+    fun confirmPendingAutoTransaction(id: Long) {
+        if (id <= 0L) return
+        viewModelScope.launch {
+            repository.confirmPendingTransaction(id)
+        }
+    }
+
+    fun ignorePendingAutoTransaction(id: Long) {
+        if (id <= 0L) return
+        viewModelScope.launch {
+            repository.ignorePendingTransaction(id)
+        }
     }
 }
 

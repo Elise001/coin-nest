@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -34,6 +35,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,9 +54,12 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.util.MoneyFormat
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -88,6 +93,15 @@ private data class CategoryShare(
     val ratio: Float
 )
 
+private data class RecordTemplate(
+    val label: String,
+    val amountYuan: String,
+    val isIncome: Boolean,
+    val parent: String,
+    val child: String,
+    val note: String
+)
+
 private val zone: ZoneId = ZoneId.systemDefault()
 private val rowTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
 
@@ -95,6 +109,8 @@ private val rowTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("M
 fun HomeScreen(
     state: HomeUiState,
     onAddTransaction: (String, Boolean, String, String, String) -> Unit,
+    onConfirmPendingAuto: (Long) -> Unit,
+    onIgnorePendingAuto: (Long) -> Unit,
     onAddCategory: (String, String) -> Unit,
     onSelectMonth: (YearMonth) -> Unit,
     onSetMonthBudget: (String) -> Unit,
@@ -131,7 +147,7 @@ fun HomeScreen(
         Box(modifier = Modifier.weight(1f)) {
             when (mainTabs[selectedMainTab]) {
                 MainTab.Overview -> OverviewScreen(state, onSelectMonth)
-                MainTab.Record -> RecordTab(state, onAddTransaction)
+                MainTab.Record -> RecordTab(state, onAddTransaction, onConfirmPendingAuto, onIgnorePendingAuto)
                 MainTab.Settings -> SettingsTab(state, onAddCategory, onSetMonthBudget)
             }
         }
@@ -260,6 +276,13 @@ private fun OverviewScreen(state: HomeUiState, onSelectMonth: (YearMonth) -> Uni
                     if (selectedDayTransactions.isEmpty()) item { GlassCard { Text("当天暂无流水") } }
                     else items(selectedDayTransactions, key = { it.id }, contentType = { "tx_row" }) { tx -> TransactionRow(tx) }
                 } else {
+                    item {
+                        MonthlyComparisonCard(
+                            month = selectedMonth,
+                            currentExpenseCents = state.selectedMonthSummary.expenseCents,
+                            previousExpenseCents = state.previousMonthSummary.expenseCents
+                        )
+                    }
                     item { TrendChartCard("月内支出趋势", monthDailyTrend) }
                     item { CategoryShareCard("月支出分类", monthCategoryShare) }
                 }
@@ -314,9 +337,9 @@ private fun MonthSwitcher(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("上月", modifier = Modifier.clickable { onPrev() }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = onPrev) { Text("上月") }
             Text("${month.year}年${month.monthValue}月", fontWeight = FontWeight.SemiBold)
-            Text("下月", modifier = Modifier.clickable { onNext() }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = onNext) { Text("下月") }
         }
     }
 }
@@ -378,16 +401,30 @@ private fun CategoryShareCard(title: String, shares: List<CategoryShare>) {
 @Composable
 private fun RecordTab(
     state: HomeUiState,
-    onAddTransaction: (String, Boolean, String, String, String) -> Unit
+    onAddTransaction: (String, Boolean, String, String, String) -> Unit,
+    onConfirmPendingAuto: (Long) -> Unit,
+    onIgnorePendingAuto: (Long) -> Unit
 ) {
     val context = LocalContext.current
-    var amount by remember { mutableStateOf("") }
-    var isIncome by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf("") }
-    var parentExpanded by remember { mutableStateOf(false) }
-    var childExpanded by remember { mutableStateOf(false) }
+    var amount by rememberSaveable { mutableStateOf("") }
+    var isIncome by rememberSaveable { mutableStateOf(false) }
+    var note by rememberSaveable { mutableStateOf("") }
+    var parentExpanded by rememberSaveable { mutableStateOf(false) }
+    var childExpanded by rememberSaveable { mutableStateOf(false) }
     var parentCategory by rememberSaveable { mutableStateOf("") }
     var childCategory by rememberSaveable { mutableStateOf("") }
+    var amountError by rememberSaveable { mutableStateOf<String?>(null) }
+    var categoryError by rememberSaveable { mutableStateOf(false) }
+    val templates = remember {
+        listOf(
+            RecordTemplate("早餐", "15", false, "生活", "餐饮", "早餐"),
+            RecordTemplate("午饭", "35", false, "生活", "餐饮", "午饭"),
+            RecordTemplate("咖啡", "18", false, "生活", "餐饮", "咖啡"),
+            RecordTemplate("地铁", "4", false, "工作", "通勤", "通勤"),
+            RecordTemplate("工资", "5000", true, "收入", "工资", "工资入账")
+        )
+    }
+    val shownTemplates = remember(isIncome, templates) { templates.filter { it.isIncome == isIncome } }
 
     val grouped = remember(state.categories) { state.categories.groupBy { it.parent } }
     val parentOptions = remember(grouped, isIncome) {
@@ -395,11 +432,36 @@ private fun RecordTab(
         if (isIncome) keys.filter { it == "收入" }.ifEmpty { keys } else keys.filter { it != "收入" }.ifEmpty { keys }
     }
     val childOptions = remember(parentCategory, grouped) { grouped[parentCategory].orEmpty().map { it.child }.distinct().sorted() }
+    val canSubmit = remember(amount, parentCategory, childCategory) {
+        val parsed = amount.toBigDecimalOrNull()
+        parsed != null && parsed > BigDecimal.ZERO && parentCategory.isNotBlank() && childCategory.isNotBlank()
+    }
 
     LaunchedEffect(parentOptions) { if (parentCategory !in parentOptions) parentCategory = parentOptions.firstOrNull().orEmpty() }
     LaunchedEffect(childOptions) { if (childCategory !in childOptions) childCategory = childOptions.firstOrNull().orEmpty() }
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (state.pendingAutoTransactions.isNotEmpty()) {
+            item {
+                GlassCard {
+                    Text("待确认自动记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("通知错过也没关系，可在这里确认或取消。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    state.pendingAutoTransactions.take(5).forEach { tx ->
+                        PendingTransactionRow(
+                            tx = tx,
+                            onConfirm = { onConfirmPendingAuto(tx.id) },
+                            onIgnore = { onIgnorePendingAuto(tx.id) }
+                        )
+                    }
+                    if (state.pendingAutoTransactions.size > 5) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("还有 ${state.pendingAutoTransactions.size - 5} 条待处理", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
         item {
             GlassCard {
                 Text("快速记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -410,36 +472,116 @@ private fun RecordTab(
                     Switch(checked = isIncome, onCheckedChange = { isIncome = it })
                 }
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(value = amount, onValueChange = { amount = it }, modifier = Modifier.fillMaxWidth(), label = { Text("金额（元）") }, singleLine = true)
+                Text("模板记账", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(6.dp))
+                shownTemplates.chunked(2).forEach { rowItems ->
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowItems.forEach { tpl ->
+                            OutlinedButton(
+                                onClick = {
+                                    amount = tpl.amountYuan
+                                    isIncome = tpl.isIncome
+                                    parentCategory = tpl.parent
+                                    childCategory = tpl.child
+                                    note = tpl.note
+                                    amountError = null
+                                    categoryError = false
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text(tpl.label) }
+                        }
+                        if (rowItems.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = {
+                        amount = it
+                        if (amountError != null) amountError = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("金额（元）") },
+                    singleLine = true,
+                    isError = amountError != null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    supportingText = { amountError?.let { msg -> Text(msg) } }
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 ExposedDropdownMenuBox(expanded = parentExpanded, onExpandedChange = { parentExpanded = !parentExpanded }) {
-                    OutlinedTextField(value = parentCategory, onValueChange = {}, readOnly = true, modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(), label = { Text("一级分类") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = parentExpanded) })
+                    OutlinedTextField(
+                        value = parentCategory,
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(),
+                        label = { Text("一级分类") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = parentExpanded) },
+                        isError = categoryError && parentCategory.isBlank()
+                    )
                     ExposedDropdownMenu(expanded = parentExpanded, onDismissRequest = { parentExpanded = false }) {
-                        parentOptions.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { parentCategory = item; childCategory = grouped[item]?.firstOrNull()?.child.orEmpty(); parentExpanded = false }) }
+                        parentOptions.forEach { item ->
+                            DropdownMenuItem(
+                                text = { Text(item) },
+                                onClick = {
+                                    parentCategory = item
+                                    childCategory = grouped[item]?.firstOrNull()?.child.orEmpty()
+                                    categoryError = false
+                                    parentExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 ExposedDropdownMenuBox(expanded = childExpanded, onExpandedChange = { childExpanded = !childExpanded }) {
-                    OutlinedTextField(value = childCategory, onValueChange = {}, readOnly = true, modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(), label = { Text("二级分类") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = childExpanded) })
+                    OutlinedTextField(
+                        value = childCategory,
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(),
+                        label = { Text("二级分类") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = childExpanded) },
+                        isError = categoryError && childCategory.isBlank()
+                    )
                     ExposedDropdownMenu(expanded = childExpanded, onDismissRequest = { childExpanded = false }) {
-                        childOptions.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { childCategory = item; childExpanded = false }) }
+                        childOptions.forEach { item ->
+                            DropdownMenuItem(
+                                text = { Text(item) },
+                                onClick = {
+                                    childCategory = item
+                                    categoryError = false
+                                    childExpanded = false
+                                }
+                            )
+                        }
                     }
+                }
+                if (categoryError) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("请选择完整分类", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = note, onValueChange = { note = it }, modifier = Modifier.fillMaxWidth(), label = { Text("备注（可选）") }, maxLines = 2)
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(onClick = {
-                    val parsedAmount = amount.toDoubleOrNull()
-                    if (parsedAmount == null || parsedAmount <= 0.0) {
-                        Toast.makeText(context, "请输入正确金额", Toast.LENGTH_SHORT).show(); return@Button
+                    val parsedAmount = amount.toBigDecimalOrNull()
+                    if (parsedAmount == null || parsedAmount <= BigDecimal.ZERO) {
+                        amountError = "请输入正确金额"
+                        return@Button
                     }
                     if (parentCategory.isBlank() || childCategory.isBlank()) {
-                        Toast.makeText(context, "请选择分类", Toast.LENGTH_SHORT).show(); return@Button
+                        categoryError = true
+                        return@Button
                     }
+                    amountError = null
+                    categoryError = false
                     onAddTransaction(amount, isIncome, parentCategory, childCategory, note)
                     amount = ""; note = ""
                     Toast.makeText(context, "保存成功", Toast.LENGTH_SHORT).show()
-                }, modifier = Modifier.fillMaxWidth()) { Text("保存记录") }
+                }, modifier = Modifier.fillMaxWidth(), enabled = canSubmit) { Text("保存记录") }
             }
         }
     }
@@ -452,9 +594,14 @@ private fun SettingsTab(
     onSetMonthBudget: (String) -> Unit
 ) {
     val context = LocalContext.current
-    var budget by remember { mutableStateOf("") }
-    var newParent by remember { mutableStateOf("") }
-    var newChild by remember { mutableStateOf("") }
+    var budget by rememberSaveable { mutableStateOf("") }
+    var budgetError by rememberSaveable { mutableStateOf<String?>(null) }
+    var newParent by rememberSaveable { mutableStateOf("") }
+    var newChild by rememberSaveable { mutableStateOf("") }
+    val canUpdateBudget = remember(budget) {
+        val parsed = budget.toBigDecimalOrNull()
+        parsed != null && parsed > BigDecimal.ZERO
+    }
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -484,9 +631,34 @@ private fun SettingsTab(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("当前预算：${state.monthBudgetCents?.let { MoneyFormat.fromCents(it) } ?: "未设置"}")
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(value = budget, onValueChange = { budget = it }, modifier = Modifier.fillMaxWidth(), label = { Text("本月预算（元）") }, singleLine = true)
+                OutlinedTextField(
+                    value = budget,
+                    onValueChange = {
+                        budget = it
+                        if (budgetError != null) budgetError = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("本月预算（元）") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    isError = budgetError != null,
+                    supportingText = { budgetError?.let { msg -> Text(msg) } }
+                )
                 Spacer(modifier = Modifier.height(10.dp))
-                Button(onClick = { onSetMonthBudget(budget) }, modifier = Modifier.fillMaxWidth()) { Text("更新预算") }
+                Button(
+                    onClick = {
+                        val parsed = budget.toBigDecimalOrNull()
+                        if (parsed == null || parsed <= BigDecimal.ZERO) {
+                            budgetError = "请输入正确预算"
+                            return@Button
+                        }
+                        onSetMonthBudget(budget)
+                        budget = ""
+                        Toast.makeText(context, "预算已更新", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = canUpdateBudget
+                ) { Text("更新预算") }
             }
         }
         item {
@@ -544,6 +716,42 @@ private fun BudgetProgressCard(expense: Long, budget: Long) {
         Spacer(modifier = Modifier.height(6.dp))
         Text("本月支出：${MoneyFormat.fromCents(expense)} / ${MoneyFormat.fromCents(budget)}")
         Text("使用率：$percent%（$status）")
+    }
+}
+
+@Composable
+private fun MonthlyComparisonCard(
+    month: YearMonth,
+    currentExpenseCents: Long,
+    previousExpenseCents: Long
+) {
+    val delta = currentExpenseCents - previousExpenseCents
+    val base = previousExpenseCents.coerceAtLeast(1L)
+    val percent = kotlin.math.abs(delta).toFloat() / base.toFloat() * 100f
+    val title = "${month.monthValue}月变化提醒"
+    val trendText = when {
+        previousExpenseCents <= 0L && currentExpenseCents <= 0L -> "本月与上月都暂无支出记录。"
+        previousExpenseCents <= 0L -> "上月几乎无支出，本月为 ${MoneyFormat.fromCents(currentExpenseCents)}。"
+        delta > 0L -> "较上月上升 ${percent.toInt()}%（+${MoneyFormat.fromCents(delta)}）"
+        delta < 0L -> "较上月下降 ${percent.toInt()}%（${MoneyFormat.fromCents(delta)}）"
+        else -> "与上月基本持平。"
+    }
+    val actionText = when {
+        previousExpenseCents > 0L && delta > 0L && percent >= 30f -> "建议：本周先锁定高频支出分类，设一个日上限，避免继续放大。"
+        previousExpenseCents > 0L && delta > 0L -> "建议：接下来几天优先记录大额消费，确认增长来源。"
+        delta < 0L -> "建议：保持当前节奏，继续用模板或自动记账减少手动成本。"
+        else -> "建议：保持记录频率，月底再复盘趋势。"
+    }
+
+    GlassCard {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text("本月支出：${MoneyFormat.fromCents(currentExpenseCents)}")
+        Text("上月支出：${MoneyFormat.fromCents(previousExpenseCents)}")
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(trendText, fontWeight = FontWeight.Medium)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(actionText, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -615,15 +823,47 @@ private fun CalendarCell(
 }
 
 @Composable
+private fun PendingTransactionRow(
+    tx: TransactionEntity,
+    onConfirm: () -> Unit,
+    onIgnore: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEAD0)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
+            Text("待确认 ${MoneyFormat.fromCents(tx.amountCents)}", fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text("${tx.source}  ${tx.note}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onIgnore, modifier = Modifier.weight(1f)) { Text("取消") }
+                Button(onClick = onConfirm, modifier = Modifier.weight(1f)) { Text("确认入账") }
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+@Composable
 private fun TransactionRow(tx: TransactionEntity) {
     val prefix = if (tx.type == "INCOME") "+" else "-"
+    val amountColor = if (tx.type == "INCOME") Color(0xFF2E7D32) else Color(0xFFB23A30)
     val timeText = remember(tx.occurredAtEpochMs) { Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter) }
     Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF2DE)), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Text(text = "$prefix${MoneyFormat.fromCents(tx.amountCents)}  ${tx.parentCategory}/${tx.childCategory}", fontWeight = FontWeight.SemiBold)
+            Text(
+                text = "$prefix${MoneyFormat.fromCents(tx.amountCents)}  ${tx.parentCategory}/${tx.childCategory}",
+                fontWeight = FontWeight.SemiBold,
+                color = amountColor
+            )
             Spacer(modifier = Modifier.height(2.dp))
             Text("来源：${tx.source}  时间：$timeText")
-            if (tx.note.isNotBlank()) Text("备注：${tx.note}", maxLines = 1)
+            if (tx.note.isNotBlank()) {
+                Text("备注：${tx.note}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
