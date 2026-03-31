@@ -19,6 +19,8 @@ import com.example.coin_nest.ui.CoinNestViewModel
 import com.example.coin_nest.ui.CoinNestViewModelFactory
 import com.example.coin_nest.ui.HomeScreen
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.coin_nest.ui.theme.CoinnestTheme
 
@@ -30,9 +32,11 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {}
+    private var initialMainTabIndex by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        initialMainTabIndex = intent?.getIntExtra(PaymentActionNotifier.EXTRA_OPEN_TAB, 0) ?: 0
         ServiceLocator.init(applicationContext)
         BudgetNotifier.ensureChannel(this)
         PaymentActionNotifier.ensureChannel(this)
@@ -44,9 +48,15 @@ class MainActivity : ComponentActivity() {
                 Scaffold(modifier = Modifier.fillMaxSize()) { paddingValues ->
                     HomeScreen(
                         state = state,
+                        initialMainTabIndex = initialMainTabIndex,
                         onAddTransaction = viewModel::addTransaction,
                         onConfirmPendingAuto = viewModel::confirmPendingAutoTransaction,
                         onIgnorePendingAuto = viewModel::ignorePendingAutoTransaction,
+                        onUpdateTransactionCategory = viewModel::updateTransactionCategory,
+                        onDeleteTransaction = viewModel::deleteTransaction,
+                        onExportBackupJson = viewModel::exportBackupJson,
+                        onImportBackupJson = viewModel::importBackupJson,
+                        onImportTransactions = viewModel::importTransactions,
                         onAddCategory = viewModel::addCategory,
                         onSelectMonth = viewModel::selectMonth,
                         onSetMonthBudget = viewModel::setCurrentMonthBudget,
@@ -61,5 +71,11 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        initialMainTabIndex = intent.getIntExtra(PaymentActionNotifier.EXTRA_OPEN_TAB, initialMainTabIndex)
     }
 }

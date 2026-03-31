@@ -27,4 +27,3 @@ data class TransactionInput(
     val note: String = "",
     val occurredAtEpochMs: Long
 )
-

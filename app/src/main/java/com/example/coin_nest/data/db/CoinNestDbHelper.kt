@@ -21,6 +21,7 @@ class CoinNestDbHelper(context: Context) : SQLiteOpenHelper(
                 child_category TEXT NOT NULL,
                 source TEXT NOT NULL,
                 note TEXT NOT NULL,
+                tag TEXT NOT NULL DEFAULT '',
                 occurred_at_epoch_ms INTEGER NOT NULL,
                 created_at_epoch_ms INTEGER NOT NULL,
                 status TEXT NOT NULL DEFAULT 'CONFIRMED',
@@ -60,11 +61,13 @@ class CoinNestDbHelper(context: Context) : SQLiteOpenHelper(
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status)")
             db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_fingerprint ON transactions(fingerprint)")
         }
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE transactions ADD COLUMN tag TEXT NOT NULL DEFAULT ''")
+        }
     }
 
     companion object {
         private const val DB_NAME = "coin_nest_sqlite.db"
-        private const val DB_VERSION = 2
+        private const val DB_VERSION = 3
     }
 }
-

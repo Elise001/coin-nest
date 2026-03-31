@@ -21,6 +21,8 @@ object PaymentActionNotifier {
     const val ACTION_CONFIRM = "com.example.coin_nest.action.CONFIRM_PENDING"
     const val ACTION_CANCEL = "com.example.coin_nest.action.CANCEL_PENDING"
     const val EXTRA_TX_ID = "extra_tx_id"
+    const val EXTRA_OPEN_TAB = "extra_open_tab"
+    const val TAB_RECORD = 1
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -47,6 +49,10 @@ object PaymentActionNotifier {
         }
         ensureChannel(context)
         val openIntent = Intent(context, MainActivity::class.java)
+            .apply {
+                putExtra(EXTRA_OPEN_TAB, TAB_RECORD)
+                putExtra(EXTRA_TX_ID, txId)
+            }
         val openPendingIntent = PendingIntent.getActivity(
             context,
             txId.toInt(),
@@ -85,7 +91,7 @@ object PaymentActionNotifier {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
-            .setAutoCancel(false)
+            .setAutoCancel(true)
             .setContentIntent(openPendingIntent)
             .addAction(R.drawable.ic_launcher_foreground, "\u786e\u8ba4", confirmPendingIntent)
             .addAction(R.drawable.ic_launcher_foreground, "\u53d6\u6d88", cancelPendingIntent)

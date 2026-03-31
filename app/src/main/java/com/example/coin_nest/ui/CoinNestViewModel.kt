@@ -10,6 +10,9 @@ import com.example.coin_nest.data.model.CategoryItem
 import com.example.coin_nest.data.model.TransactionInput
 import com.example.coin_nest.data.model.TransactionType
 import com.example.coin_nest.util.DateRangeUtils
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.YearMonth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,6 +27,7 @@ data class HomeUiState(
     val daily: BalanceSummary = BalanceSummary(),
     val monthly: BalanceSummary = BalanceSummary(),
     val yearly: BalanceSummary = BalanceSummary(),
+    val previousYearSummary: BalanceSummary = BalanceSummary(),
     val selectedMonth: YearMonth = YearMonth.now(),
     val selectedMonthSummary: BalanceSummary = BalanceSummary(),
     val previousMonthSummary: BalanceSummary = BalanceSummary(),
@@ -39,6 +43,7 @@ private data class SummaryAndCategory(
     val daily: BalanceSummary,
     val monthly: BalanceSummary,
     val yearly: BalanceSummary,
+    val previousYearly: BalanceSummary,
     val monthBudgetCents: Long?,
     val categories: List<CategoryItem>
 )
@@ -54,23 +59,44 @@ private data class SelectedMonthData(
 class CoinNestViewModel(
     private val repository: CoinNestRepository
 ) : ViewModel() {
+    private val zone: ZoneId = ZoneId.systemDefault()
     private val dayRange = DateRangeUtils.todayRange()
     private val monthRange = DateRangeUtils.monthRange()
     private val yearRange = DateRangeUtils.yearRange()
+    private val previousYearRange = run {
+        val today = Instant.ofEpochMilli(System.currentTimeMillis()).atZone(zone).toLocalDate()
+        val first = LocalDate.of(today.year - 1, 1, 1)
+        val start = first.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = first.plusYears(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        start until end
+    }
     private val monthKey = DateRangeUtils.currentMonthKey()
     private val selectedMonthFlow = MutableStateFlow(YearMonth.now())
 
-    private val summaryAndCategoryFlow = combine(
+    private val summaryBaseFlow = combine(
         repository.observeSummary(dayRange.first, dayRange.last + 1),
         repository.observeSummary(monthRange.first, monthRange.last + 1),
         repository.observeSummary(yearRange.first, yearRange.last + 1),
-        repository.observeMonthBudget(monthKey),
+        repository.observeSummary(previousYearRange.first, previousYearRange.last + 1),
+        repository.observeMonthBudget(monthKey)
+    ) { daily, monthly, yearly, previousYearly, budget ->
+        arrayOf(daily, monthly, yearly, previousYearly, budget)
+    }
+
+    private val summaryAndCategoryFlow = combine(
+        summaryBaseFlow,
         repository.observeCategories()
-    ) { daily, monthly, yearly, budget, categories ->
+    ) { base, categories ->
+        val daily = base[0] as BalanceSummary
+        val monthly = base[1] as BalanceSummary
+        val yearly = base[2] as BalanceSummary
+        val previousYearly = base[3] as BalanceSummary
+        val budget = base[4] as com.example.coin_nest.data.db.MonthlyBudgetEntity?
         SummaryAndCategory(
             daily = daily,
             monthly = monthly,
             yearly = yearly,
+            previousYearly = previousYearly,
             monthBudgetCents = budget?.limitCents,
             categories = categories
         )
@@ -116,6 +142,7 @@ class CoinNestViewModel(
             daily = summary.daily,
             monthly = summary.monthly,
             yearly = summary.yearly,
+            previousYearSummary = summary.previousYearly,
             selectedMonth = selectedMonthData.month,
             selectedMonthSummary = selectedMonthData.summary,
             previousMonthSummary = selectedMonthData.previousMonthSummary,
@@ -186,6 +213,71 @@ class CoinNestViewModel(
         if (id <= 0L) return
         viewModelScope.launch {
             repository.ignorePendingTransaction(id)
+        }
+    }
+
+    fun updateTransactionCategory(id: Long, parentCategory: String, childCategory: String) {
+        if (id <= 0L) return
+        viewModelScope.launch {
+            repository.updateTransactionCategory(id, parentCategory, childCategory)
+        }
+    }
+
+    fun deleteTransaction(id: Long) {
+        if (id <= 0L) return
+        viewModelScope.launch {
+            repository.deleteTransaction(id)
+        }
+    }
+
+    fun exportBackupJson(onResult: (String) -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            runCatching { repository.exportBackupJson() }
+                .onSuccess(onResult)
+                .onFailure { onError(it.message ?: "导出失败") }
+        }
+    }
+
+    fun importBackupJson(
+        json: String,
+        replaceExisting: Boolean,
+        onResult: (Int, Int) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            runCatching { repository.importBackupJson(json, replaceExisting) }
+                .onSuccess { (txCount, catCount) -> onResult(txCount, catCount) }
+                .onFailure { onError(it.message ?: "导入失败") }
+        }
+    }
+
+    fun importTransactions(
+        drafts: List<ImportTransactionDraft>,
+        onResult: (Int) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                var count = 0
+                drafts.forEach { draft ->
+                    val amount = draft.amountYuan.toDoubleOrNull() ?: return@forEach
+                    if (amount <= 0.0) return@forEach
+                    repository.addTransaction(
+                        TransactionInput(
+                            amountCents = (amount * 100).toLong(),
+                            type = if (draft.isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
+                            parentCategory = draft.parentCategory,
+                            childCategory = draft.childCategory,
+                            source = draft.source,
+                            note = draft.note,
+                            occurredAtEpochMs = draft.occurredAtEpochMs
+                        )
+                    )
+                    count++
+                }
+                count
+            }.onSuccess(onResult)
+                .onFailure { onError(it.message ?: "批量导入失败") }
         }
     }
 }
