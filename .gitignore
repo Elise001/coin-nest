@@ -13,3 +13,12 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Kotlin/Gradle local caches and logs
+.kotlin/
+
+# Build outputs
+app/release/
+
+# Local signing material
+qianming/
