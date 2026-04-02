@@ -1,6 +1,7 @@
 ﻿package com.example.coin_nest.ui
 
 import android.content.Intent
+import android.app.DatePickerDialog
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.PowerManager
@@ -94,6 +95,9 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.apache.poi.ss.usermodel.Cell
+import org.apache.poi.ss.usermodel.DataFormatter
+import org.apache.poi.ss.usermodel.DateUtil
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import android.provider.OpenableColumns
 
@@ -156,12 +160,13 @@ private data class ParsedImportItem(
 
 private val zone: ZoneId = ZoneId.systemDefault()
 private val rowTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
+private val dateOnlyFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
 @Composable
 fun HomeScreen(
     state: HomeUiState,
     initialMainTabIndex: Int = 0,
-    onAddTransaction: (String, Boolean, String, String, String) -> Unit,
+    onAddTransaction: (String, Boolean, String, String, String, Long) -> Unit,
     onConfirmPendingAuto: (Long) -> Unit,
     onIgnorePendingAuto: (Long) -> Unit,
     onUpdateTransactionCategory: (Long, String, String) -> Unit,
@@ -269,11 +274,18 @@ private fun OverviewScreen(
     var editChild by rememberSaveable { mutableStateOf("") }
     var selectedWeekStart by rememberSaveable { mutableStateOf(LocalDate.now().minusDays((LocalDate.now().dayOfWeek.value - 1).toLong())) }
     val selectedMonth = state.selectedMonth
+    val today = remember { LocalDate.now() }
 
-    val todayTransactions = state.todayTransactions
     val monthTransactions = state.monthTransactions
     val yearTransactions = state.yearTransactions
     val groupedCategories = remember(state.categories) { state.categories.groupBy { it.parent } }
+    val txByDate = remember(yearTransactions) {
+        yearTransactions.groupBy { Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).toLocalDate() }
+    }
+    val selectedDailyTransactions = remember(txByDate, selectedDate) {
+        txByDate[selectedDate].orEmpty().sortedByDescending { it.occurredAtEpochMs }
+    }
+    val selectedDaySummary = remember(selectedDailyTransactions) { calculateSummary(selectedDailyTransactions) }
 
     val weekTransactions = remember(yearTransactions, selectedWeekStart) {
         val endExclusive = selectedWeekStart.plusDays(7)
@@ -326,6 +338,9 @@ private fun OverviewScreen(
     val selectedDayTransactions = remember(monthByDate, selectedDate) {
         monthByDate[selectedDate].orEmpty().sortedByDescending { it.occurredAtEpochMs }
     }
+    LaunchedEffect(selectedDate, today) {
+        if (selectedDate.isAfter(today)) selectedDate = today
+    }
 
     val listState = rememberLazyListState()
 
@@ -334,17 +349,50 @@ private fun OverviewScreen(
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item { OverviewModeSwitch(mode = mode, onModeChange = { mode = it; if (it != OverviewTabMode.Monthly) showMonthCalendar = false }) }
+        item {
+            OverviewModeSwitch(
+                mode = mode,
+                onModeChange = {
+                    mode = it
+                    if (it != OverviewTabMode.Monthly) showMonthCalendar = false
+                }
+            )
+        }
 
         when (mode) {
             OverviewTabMode.Daily -> {
-                item { SummaryCard("当日", state.daily.incomeCents, state.daily.expenseCents, state.daily.balanceCents, highlight = true) }
+                item {
+                    DaySwitcher(
+                        selectedDate = selectedDate,
+                        today = today,
+                        onPrev = { selectedDate = selectedDate.minusDays(1) },
+                        onNext = {
+                            val next = selectedDate.plusDays(1)
+                            if (!next.isAfter(today)) selectedDate = next
+                        }
+                    )
+                }
+                item {
+                    SummaryCard(
+                        if (selectedDate == today) "当日" else "${selectedDate.monthValue}月${selectedDate.dayOfMonth}日",
+                        selectedDaySummary.incomeCents,
+                        selectedDaySummary.expenseCents,
+                        selectedDaySummary.balanceCents,
+                        highlight = true
+                    )
+                }
                 if (state.monthBudgetCents != null && state.monthBudgetCents > 0) {
                     item { BudgetProgressCard(expense = state.monthly.expenseCents, budget = state.monthBudgetCents) }
                 }
-                item { Text("今日流水", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
-                if (todayTransactions.isEmpty()) item { GlassCard { Text("今天暂无流水") } }
-                else items(todayTransactions, key = { it.id }, contentType = { "tx_row" }) { tx ->
+                item {
+                    Text(
+                        if (selectedDate == today) "当日流水" else "${selectedDate.format(DateTimeFormatter.ofPattern("MM-dd"))} 流水",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                if (selectedDailyTransactions.isEmpty()) item { GlassCard { Text("当天暂无流水") } }
+                else items(selectedDailyTransactions, key = { it.id }, contentType = { "tx_row" }) { tx ->
                     TransactionRow(
                         tx = tx,
                         allowCategoryEdit = shouldAllowCategoryEdit(tx),
@@ -767,7 +815,7 @@ private fun CategoryShareCard(title: String, shares: List<CategoryShare>) {
 @Composable
 private fun RecordTab(
     state: HomeUiState,
-    onAddTransaction: (String, Boolean, String, String, String) -> Unit,
+    onAddTransaction: (String, Boolean, String, String, String, Long) -> Unit,
     onConfirmPendingAuto: (Long) -> Unit,
     onIgnorePendingAuto: (Long) -> Unit
 ) {
@@ -779,6 +827,8 @@ private fun RecordTab(
     var childExpanded by rememberSaveable { mutableStateOf(false) }
     var parentCategory by rememberSaveable { mutableStateOf("") }
     var childCategory by rememberSaveable { mutableStateOf("") }
+    var selectedTemplateLabel by rememberSaveable { mutableStateOf("") }
+    var selectedRecordDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
     var amountError by rememberSaveable { mutableStateOf<String?>(null) }
     var categoryError by rememberSaveable { mutableStateOf(false) }
     val templates = remember {
@@ -802,9 +852,11 @@ private fun RecordTab(
         val parsed = amount.toBigDecimalOrNull()
         parsed != null && parsed > BigDecimal.ZERO && parentCategory.isNotBlank() && childCategory.isNotBlank()
     }
+    val today = remember { LocalDate.now() }
 
     LaunchedEffect(parentOptions) { if (parentCategory !in parentOptions) parentCategory = parentOptions.firstOrNull().orEmpty() }
     LaunchedEffect(childOptions) { if (childCategory !in childOptions) childCategory = childOptions.firstOrNull().orEmpty() }
+    LaunchedEffect(isIncome) { selectedTemplateLabel = "" }
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (state.pendingAutoTransactions.isNotEmpty()) {
@@ -838,10 +890,11 @@ private fun RecordTab(
             GlassCard {
                 Text("快速记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (isIncome) "收入" else "支出")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Switch(checked = isIncome, onCheckedChange = { isIncome = it })
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!isIncome) Button(onClick = {}, modifier = Modifier.weight(1f)) { Text("支出") }
+                    else OutlinedButton(onClick = { isIncome = false }, modifier = Modifier.weight(1f)) { Text("支出") }
+                    if (isIncome) Button(onClick = {}, modifier = Modifier.weight(1f)) { Text("收入") }
+                    else OutlinedButton(onClick = { isIncome = true }, modifier = Modifier.weight(1f)) { Text("收入") }
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text("模板记账", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -849,18 +902,36 @@ private fun RecordTab(
                 shownTemplates.chunked(2).forEach { rowItems ->
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         rowItems.forEach { tpl ->
-                            OutlinedButton(
-                                onClick = {
-                                    amount = tpl.amountYuan
-                                    isIncome = tpl.isIncome
-                                    parentCategory = tpl.parent
-                                    childCategory = tpl.child
-                                    note = tpl.note
-                                    amountError = null
-                                    categoryError = false
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) { Text(tpl.label) }
+                            val selected = selectedTemplateLabel == tpl.label
+                            if (selected) {
+                                Button(
+                                    onClick = {
+                                        amount = tpl.amountYuan
+                                        isIncome = tpl.isIncome
+                                        parentCategory = tpl.parent
+                                        childCategory = tpl.child
+                                        note = tpl.note
+                                        selectedTemplateLabel = tpl.label
+                                        amountError = null
+                                        categoryError = false
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) { Text(tpl.label) }
+                            } else {
+                                OutlinedButton(
+                                    onClick = {
+                                        amount = tpl.amountYuan
+                                        isIncome = tpl.isIncome
+                                        parentCategory = tpl.parent
+                                        childCategory = tpl.child
+                                        note = tpl.note
+                                        selectedTemplateLabel = tpl.label
+                                        amountError = null
+                                        categoryError = false
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) { Text(tpl.label) }
+                            }
                         }
                         if (rowItems.size == 1) {
                             Spacer(modifier = Modifier.weight(1f))
@@ -937,6 +1008,26 @@ private fun RecordTab(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = note, onValueChange = { note = it }, modifier = Modifier.fillMaxWidth(), label = { Text("备注（可选）") }, maxLines = 2)
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        DatePickerDialog(
+                            context,
+                            { _, year, month, dayOfMonth ->
+                                val picked = LocalDate.of(year, month + 1, dayOfMonth)
+                                if (!picked.isAfter(today)) selectedRecordDate = picked
+                            },
+                            selectedRecordDate.year,
+                            selectedRecordDate.monthValue - 1,
+                            selectedRecordDate.dayOfMonth
+                        ).apply {
+                            datePicker.maxDate = System.currentTimeMillis()
+                        }.show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("日期：${selectedRecordDate.format(dateOnlyFormatter)}")
+                }
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(onClick = {
                     val parsedAmount = amount.toBigDecimalOrNull()
@@ -950,8 +1041,16 @@ private fun RecordTab(
                     }
                     amountError = null
                     categoryError = false
-                    onAddTransaction(amount, isIncome, parentCategory, childCategory, note)
+                    onAddTransaction(
+                        amount,
+                        isIncome,
+                        parentCategory,
+                        childCategory,
+                        note,
+                        selectedRecordDate.atTime(LocalTime.now()).atZone(zone).toInstant().toEpochMilli()
+                    )
                     amount = ""; note = ""
+                    selectedTemplateLabel = ""
                     Toast.makeText(context, "保存成功", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth(), enabled = canSubmit) { Text("保存记录") }
             }
@@ -1373,6 +1472,27 @@ private fun MonthlyComparisonCard(
         Text(trendText, fontWeight = FontWeight.Medium)
         Spacer(modifier = Modifier.height(4.dp))
         Text(actionText, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun DaySwitcher(
+    selectedDate: LocalDate,
+    today: LocalDate,
+    onPrev: () -> Unit,
+    onNext: () -> Unit
+) {
+    val canNext = selectedDate.isBefore(today)
+    GlassCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(onClick = onPrev) { Text("上一天") }
+            Text("${selectedDate.monthValue}/${selectedDate.dayOfMonth}", fontWeight = FontWeight.SemiBold)
+            OutlinedButton(onClick = onNext, enabled = canNext) { Text("下一天") }
+        }
     }
 }
 
@@ -1811,13 +1931,14 @@ private fun parseStatementFile(context: android.content.Context, uri: Uri): List
                 val workbook = XSSFWorkbook(stream)
                 workbook.use { wb ->
                     val sheet = wb.getSheetAt(0)
+                    val dataFormatter = DataFormatter()
                     val rows = mutableListOf<List<String>>()
                     for (r in 0..sheet.lastRowNum) {
                         val row = sheet.getRow(r) ?: continue
                         val maxCell = row.lastCellNum.toInt().coerceAtLeast(0)
                         val cols = mutableListOf<String>()
                         for (c in 0 until maxCell) {
-                            cols += row.getCell(c)?.toString()?.trim().orEmpty()
+                            cols += readExcelCellText(row.getCell(c), dataFormatter)
                         }
                         rows += cols
                     }
@@ -1835,7 +1956,7 @@ private fun parseStatementFile(context: android.content.Context, uri: Uri): List
 private fun parseStatementRows(rows: List<List<String>>, fallbackSource: String): List<ParsedImportItem> {
     if (rows.isEmpty()) return emptyList()
     val headerIndex = rows.indexOfFirst { row ->
-        val merged = row.joinToString("|")
+        val merged = row.joinToString("|") { normalizeFieldKey(it) }
         merged.contains("交易时间") || merged.contains("交易创建时间") || merged.contains("收/支") || merged.contains("金额")
     }
     if (headerIndex < 0 || headerIndex >= rows.lastIndex) return emptyList()
@@ -1846,44 +1967,58 @@ private fun parseStatementRows(rows: List<List<String>>, fallbackSource: String)
         val row = rows[i]
         if (row.isEmpty()) continue
         val map = mutableMapOf<String, String>()
-        header.forEachIndexed { idx, key -> map[key] = row.getOrNull(idx)?.trim().orEmpty() }
+        header.forEachIndexed { idx, key ->
+            map[normalizeFieldKey(key)] = row.getOrNull(idx)?.trim().orEmpty()
+        }
+        fun pick(vararg keys: String): String {
+            keys.forEach { key ->
+                val value = map[normalizeFieldKey(key)].orEmpty()
+                if (value.isNotBlank()) return value
+            }
+            return ""
+        }
 
         val timeText = firstNotBlank(
-            map["交易时间"],
-            map["交易创建时间"],
-            map["付款时间"],
-            map["完成时间"],
-            map["时间"]
+            pick("交易时间"),
+            pick("交易创建时间"),
+            pick("付款时间"),
+            pick("完成时间"),
+            pick("时间")
         )
         val title = firstNotBlank(
-            map["商品"],
-            map["商品名称"],
-            map["交易对方"],
-            map["交易对方名称"],
-            map["交易描述"],
-            map["备注"]
+            pick("商品"),
+            pick("商品名称"),
+            pick("交易对方"),
+            pick("交易对方名称"),
+            pick("交易描述"),
+            pick("备注")
         ).ifBlank { "文件导入" }
 
         if (title.contains("总支出") || title.contains("总收入")) continue
 
         val amountText = firstNotBlank(
-            map["金额(元)"],
-            map["金额（元）"],
-            map["金额"],
-            map["收/支金额"]
+            pick("金额(元)"),
+            pick("金额（元）"),
+            pick("金额"),
+            pick("收/支金额")
         )
         val amount = parseAmount(amountText) ?: continue
         if (amount <= 0.0) continue
 
-        val inOut = firstNotBlank(map["收/支"], map["资金流向"], map["类型"], map["交易类型"]).lowercase()
+        val inOut = firstNotBlank(
+            pick("收/支"),
+            pick("资金流向"),
+            pick("类型"),
+            pick("交易类型")
+        ).lowercase()
         val isIncome = amountText.contains("+") || inOut.contains("收入") || inOut.contains("入账") || inOut.contains("退款")
 
-        val status = firstNotBlank(map["当前状态"], map["交易状态"], map["状态"]).lowercase()
+        val status = firstNotBlank(pick("当前状态"), pick("交易状态"), pick("状态")).lowercase()
         if (status.isNotBlank() && !(status.contains("成功") || status.contains("已完成") || status.contains("入账中"))) {
             continue
         }
 
-        val sourceHint = firstNotBlank(map["交易来源"], map["支付方式"])
+        val sourceHint = firstNotBlank(pick("交易来源"), pick("支付方式"))
         val source = when {
             sourceHint.contains("微信") || title.contains("微信") -> "WECHAT"
             sourceHint.contains("支付宝") || title.contains("支付宝") -> "ALIPAY"
@@ -1900,6 +2035,19 @@ private fun parseStatementRows(rows: List<List<String>>, fallbackSource: String)
         )
     }
     return items
+}
+
+private fun readExcelCellText(cell: Cell?, formatter: DataFormatter): String {
+    if (cell == null) return ""
+    return when {
+        cell.cellType == org.apache.poi.ss.usermodel.CellType.NUMERIC && DateUtil.isCellDateFormatted(cell) -> {
+            runCatching {
+                val local = cell.localDateTimeCellValue
+                local.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            }.getOrElse { formatter.formatCellValue(cell).trim() }
+        }
+        else -> formatter.formatCellValue(cell).trim()
+    }
 }
 
 private fun parseCsvToRows(text: String): List<List<String>> {
@@ -1940,13 +2088,18 @@ private fun splitCsvLine(line: String): List<String> {
 private fun parseDateTimeToEpoch(raw: String?): Long? {
     if (raw.isNullOrBlank()) return null
     val s = raw.trim()
+    s.toDoubleOrNull()?.let { serial ->
+        return runCatching { DateUtil.getJavaDate(serial).time }.getOrNull()
+    }
     val dtPatterns = listOf(
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
         DateTimeFormatter.ofPattern("yyyy/M/d HH:mm:ss"),
         DateTimeFormatter.ofPattern("yyyy/M/d HH:mm"),
         DateTimeFormatter.ofPattern("yyyy.M.d HH:mm:ss"),
-        DateTimeFormatter.ofPattern("yyyy.M.d HH:mm")
+        DateTimeFormatter.ofPattern("yyyy.M.d HH:mm"),
+        DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm:ss"),
+        DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm")
     )
     dtPatterns.forEach { fmt ->
         runCatching {
@@ -1955,6 +2108,14 @@ private fun parseDateTimeToEpoch(raw: String?): Long? {
         }
     }
     return null
+}
+
+private fun normalizeFieldKey(raw: String): String {
+    return raw
+        .trim('\uFEFF')
+        .replace("（", "(")
+        .replace("）", ")")
+        .replace(Regex("\\s+"), "")
 }
 
 private fun parseAmount(raw: String?): Double? {

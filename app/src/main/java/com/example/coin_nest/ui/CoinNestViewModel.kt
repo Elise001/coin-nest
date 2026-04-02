@@ -166,7 +166,8 @@ class CoinNestViewModel(
         isIncome: Boolean,
         parentCategory: String,
         childCategory: String,
-        note: String
+        note: String,
+        occurredAtEpochMs: Long = System.currentTimeMillis()
     ) {
         val amount = amountYuan.toDoubleOrNull() ?: return
         if (amount <= 0.0) return
@@ -179,7 +180,7 @@ class CoinNestViewModel(
                     childCategory = childCategory.ifBlank { if (isIncome) "\u5176\u4ed6" else "\u672a\u5206\u7c7b" },
                     source = "MANUAL",
                     note = note,
-                    occurredAtEpochMs = System.currentTimeMillis()
+                    occurredAtEpochMs = occurredAtEpochMs
                 )
             )
         }

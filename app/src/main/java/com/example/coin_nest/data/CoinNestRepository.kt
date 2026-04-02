@@ -71,31 +71,47 @@ class CoinNestRepository(context: Context) {
     }
 
     suspend fun ensureDefaultCategories() = withContext(Dispatchers.IO) {
-        if (queryCategories().isNotEmpty()) return@withContext
         val defaults = listOf(
-            "\u5de5\u4f5c" to "\u901a\u52e4",
-            "\u5de5\u4f5c" to "\u5b66\u4e60",
             "\u751f\u6d3b" to "\u9910\u996e",
-            "\u751f\u6d3b" to "\u65e5\u7528\u54c1",
-            "\u751f\u6d3b" to "\u5a31\u4e50",
+            "\u751f\u6d3b" to "\u65e5\u7528",
+            "\u751f\u6d3b" to "\u4f4f\u5bbf",
+            "\u751f\u6d3b" to "\u6c34\u7535\u7164",
+            "\u8d2d\u7269" to "\u65e5\u5e38\u8d2d\u7269",
+            "\u8d2d\u7269" to "\u670d\u9970\u7f8e\u5986",
+            "\u8d2d\u7269" to "\u6570\u7801\u7535\u5668",
+            "\u5a31\u4e50" to "\u7535\u5f71\u6e38\u620f",
+            "\u5a31\u4e50" to "\u65c5\u884c",
+            "\u533b\u7597" to "\u95e8\u8bca\u836f\u54c1",
+            "\u793e\u4ea4" to "\u793c\u91d1\u7ea2\u5305",
+            "\u5de5\u4f5c" to "\u901a\u52e4",
+            "\u5de5\u4f5c" to "\u529e\u516c",
+            "\u7406\u8d22" to "\u57fa\u91d1\u80a1\u7968",
+            "\u7406\u8d22" to "\u4fe1\u7528\u5361\u8fd8\u6b3e",
             "\u6536\u5165" to "\u5de5\u8d44",
+            "\u6536\u5165" to "\u5956\u91d1",
+            "\u6536\u5165" to "\u8f6c\u8d26",
+            "\u6536\u5165" to "\u9000\u6b3e",
             "\u6536\u5165" to "\u5176\u4ed6"
         )
         val db = dbHelper.writableDatabase
+        var inserted = 0
+        var deleted = 0
         db.beginTransaction()
         try {
+            deleted += db.delete("categories", "parent IN (?, ?)", arrayOf("\u4ea4\u901a", "\u5b66\u4e60"))
             defaults.forEach { (parent, child) ->
                 val values = ContentValues().apply {
                     put("parent", parent)
                     put("child", child)
                 }
-                db.insertWithOnConflict("categories", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
+                val id = db.insertWithOnConflict("categories", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
+                if (id != -1L) inserted++
             }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
-        notifyChanged()
+        if (inserted > 0 || deleted > 0) notifyChanged()
     }
 
     suspend fun addCategory(parent: String, child: String) = withContext(Dispatchers.IO) {
