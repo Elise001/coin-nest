@@ -39,6 +39,7 @@ object PaymentActionNotifier {
         context: Context,
         txId: Long,
         amountCents: Long,
+        type: String,
         source: String,
         note: String
     ) {
@@ -79,7 +80,8 @@ object PaymentActionNotifier {
             cancelIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val content = "$source  ${MoneyFormat.fromCents(amountCents)}"
+        val amountPrefix = if (type.equals("INCOME", ignoreCase = true)) "+" else "-"
+        val content = "$source  $amountPrefix${MoneyFormat.fromCents(amountCents)}"
         val body = note.take(80)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)

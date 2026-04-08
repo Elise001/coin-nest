@@ -1,4 +1,4 @@
-package com.example.coin_nest.ui
+﻿package com.example.coin_nest.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -235,7 +235,7 @@ class CoinNestViewModel(
         viewModelScope.launch {
             runCatching { repository.exportBackupJson() }
                 .onSuccess(onResult)
-                .onFailure { onError(it.message ?: "导出失败") }
+                .onFailure { onError(it.message ?: "瀵煎嚭澶辫触") }
         }
     }
 
@@ -248,39 +248,10 @@ class CoinNestViewModel(
         viewModelScope.launch {
             runCatching { repository.importBackupJson(json, replaceExisting) }
                 .onSuccess { (txCount, catCount) -> onResult(txCount, catCount) }
-                .onFailure { onError(it.message ?: "导入失败") }
+                .onFailure { onError(it.message ?: "瀵煎叆澶辫触") }
         }
     }
 
-    fun importTransactions(
-        drafts: List<ImportTransactionDraft>,
-        onResult: (Int) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        viewModelScope.launch {
-            runCatching {
-                var count = 0
-                drafts.forEach { draft ->
-                    val amount = draft.amountYuan.toDoubleOrNull() ?: return@forEach
-                    if (amount <= 0.0) return@forEach
-                    repository.addTransaction(
-                        TransactionInput(
-                            amountCents = (amount * 100).toLong(),
-                            type = if (draft.isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
-                            parentCategory = draft.parentCategory,
-                            childCategory = draft.childCategory,
-                            source = draft.source,
-                            note = draft.note,
-                            occurredAtEpochMs = draft.occurredAtEpochMs
-                        )
-                    )
-                    count++
-                }
-                count
-            }.onSuccess(onResult)
-                .onFailure { onError(it.message ?: "批量导入失败") }
-        }
-    }
 }
 
 class CoinNestViewModelFactory(

@@ -284,22 +284,31 @@ class CoinNestRepository(context: Context) {
         expense to budget
     }
 
-    suspend fun addAutoExpense(
+    suspend fun addAutoTransaction(
         amountCents: Long,
+        type: TransactionType,
         source: String,
         note: String,
         fingerprint: String,
+        occurredAtEpochMs: Long,
         parent: String = "\u5f85\u5206\u7c7b",
         child: String = "\u81ea\u52a8\u8bc6\u522b"
     ): Long? = withContext(Dispatchers.IO) {
+        val safeParent = if (parent.isBlank()) "\u5f85\u5206\u7c7b" else parent.trim()
+        val safeChild = if (child.isBlank()) "\u81ea\u52a8\u8bc6\u522b" else child.trim()
+        val autoType = type.name
+        val occurredAt = occurredAtEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+        if (hasRecentAutoDuplicate(amountCents, autoType, source, occurredAt)) {
+            return@withContext null
+        }
         val values = ContentValues().apply {
             put("amount_cents", amountCents)
-            put("type", TransactionType.EXPENSE.name)
-            put("parent_category", parent)
-            put("child_category", child)
+            put("type", autoType)
+            put("parent_category", safeParent)
+            put("child_category", safeChild)
             put("source", source)
             put("note", note)
-            put("occurred_at_epoch_ms", System.currentTimeMillis())
+            put("occurred_at_epoch_ms", occurredAt)
             put("created_at_epoch_ms", System.currentTimeMillis())
             put("status", STATUS_PENDING)
             put("fingerprint", fingerprint)
@@ -316,6 +325,57 @@ class CoinNestRepository(context: Context) {
         } else {
             null
         }
+    }
+
+    private fun hasRecentAutoDuplicate(
+        amountCents: Long,
+        type: String,
+        source: String,
+        occurredAtEpochMs: Long
+    ): Boolean {
+        val windowMs = 120_000L
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT id
+            FROM transactions
+            WHERE amount_cents = ?
+              AND type = ?
+              AND source = ?
+              AND status != ?
+              AND ABS(occurred_at_epoch_ms - ?) <= ?
+            ORDER BY occurred_at_epoch_ms DESC
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(
+                amountCents.toString(),
+                type,
+                source,
+                STATUS_IGNORED,
+                occurredAtEpochMs.toString(),
+                windowMs.toString()
+            )
+        )
+        return cursor.use { it.moveToFirst() }
+    }
+
+    suspend fun addAutoExpense(
+        amountCents: Long,
+        source: String,
+        note: String,
+        fingerprint: String,
+        parent: String = "\u5f85\u5206\u7c7b",
+        child: String = "\u81ea\u52a8\u8bc6\u522b"
+    ): Long? {
+        return addAutoTransaction(
+            amountCents = amountCents,
+            type = TransactionType.EXPENSE,
+            source = source,
+            note = note,
+            fingerprint = fingerprint,
+            occurredAtEpochMs = System.currentTimeMillis(),
+            parent = parent,
+            child = child
+        )
     }
 
     private fun notifyChanged() {
