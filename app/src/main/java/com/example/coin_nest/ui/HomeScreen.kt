@@ -30,9 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -980,6 +980,8 @@ private fun SettingsTab(
     var budgetError by rememberSaveable { mutableStateOf<String?>(null) }
     var newParent by rememberSaveable { mutableStateOf("") }
     var newChild by rememberSaveable { mutableStateOf("") }
+    var autoBookHealthRefreshTick by rememberSaveable { mutableIntStateOf(0) }
+    val autoBookHealth = remember(autoBookHealthRefreshTick) { getAutoBookHealthStatus(context) }
     val canUpdateBudget = remember(budget) {
         val parsed = budget.toBigDecimalOrNull()
         parsed != null && parsed > BigDecimal.ZERO
@@ -990,7 +992,17 @@ private fun SettingsTab(
             GlassCard {
                 Text("自动记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("通过监听支付消息通知自动提取交易金额。")
+                Text("通过监听支付消息通知自动提取交易金额。请先做一次状态体检。")
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    if (autoBookHealth.healthy) "自动记账状态：可用" else "自动记账状态：待修复",
+                    color = if (autoBookHealth.healthy) Color(0xFF2E7D32) else Color(0xFFB23A30),
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                autoBookHealth.hints.forEach { hint ->
+                    Text("• $hint", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
                     onClick = {
@@ -998,6 +1010,7 @@ private fun SettingsTab(
                             ListenerPermissionActionResult.ALREADY_ENABLED -> Toast.makeText(context, "通知监听权限已开启", Toast.LENGTH_SHORT).show()
                             ListenerPermissionActionResult.OPENED_SETTINGS -> Toast.makeText(context, "请开启 Coin Nest 通知监听权限", Toast.LENGTH_SHORT).show()
                         }
+                        autoBookHealthRefreshTick++
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
@@ -1014,6 +1027,7 @@ private fun SettingsTab(
                             PaymentNotifyActionResult.OPENED_SETTINGS -> Toast.makeText(context, "请在微信通知设置页确认已开启支付通知", Toast.LENGTH_SHORT).show()
                             PaymentNotifyActionResult.APP_NOT_INSTALLED -> Toast.makeText(context, "未检测到微信", Toast.LENGTH_SHORT).show()
                         }
+                        autoBookHealthRefreshTick++
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
@@ -1030,6 +1044,7 @@ private fun SettingsTab(
                             PaymentNotifyActionResult.OPENED_SETTINGS -> Toast.makeText(context, "请在支付宝通知设置页确认已开启支付通知", Toast.LENGTH_SHORT).show()
                             PaymentNotifyActionResult.APP_NOT_INSTALLED -> Toast.makeText(context, "未检测到支付宝", Toast.LENGTH_SHORT).show()
                         }
+                        autoBookHealthRefreshTick++
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
@@ -1053,6 +1068,7 @@ private fun SettingsTab(
                         } catch (_: Exception) {
                             Toast.makeText(context, "打开失败", Toast.LENGTH_SHORT).show()
                         }
+                        autoBookHealthRefreshTick++
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),

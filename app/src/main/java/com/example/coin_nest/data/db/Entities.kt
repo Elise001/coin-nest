@@ -17,6 +17,7 @@ data class TransactionEntity(
 const val STATUS_CONFIRMED = "CONFIRMED"
 const val STATUS_PENDING = "PENDING"
 const val STATUS_IGNORED = "IGNORED"
+const val STATUS_LINKED_DUPLICATE = "LINKED_DUPLICATE"
 
 data class CategoryEntity(
     val id: Long = 0L,

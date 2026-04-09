@@ -7,6 +7,7 @@ import com.example.coin_nest.data.db.CoinNestDbHelper
 import com.example.coin_nest.data.db.MonthlyBudgetEntity
 import com.example.coin_nest.data.db.STATUS_CONFIRMED
 import com.example.coin_nest.data.db.STATUS_IGNORED
+import com.example.coin_nest.data.db.STATUS_LINKED_DUPLICATE
 import com.example.coin_nest.data.db.STATUS_PENDING
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.data.model.BalanceSummary
@@ -21,6 +22,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+
+data class AutoTransactionInsertResult(
+    val insertedId: Long?,
+    val reason: String,
+    val shouldNotify: Boolean
+)
 
 class CoinNestRepository(context: Context) {
     private val dbHelper = CoinNestDbHelper(context.applicationContext)
@@ -289,17 +296,39 @@ class CoinNestRepository(context: Context) {
         type: TransactionType,
         source: String,
         note: String,
-        fingerprint: String,
+        fingerprint: String?,
         occurredAtEpochMs: Long,
         parent: String = "\u5f85\u5206\u7c7b",
         child: String = "\u81ea\u52a8\u8bc6\u522b"
-    ): Long? = withContext(Dispatchers.IO) {
+    ): AutoTransactionInsertResult = withContext(Dispatchers.IO) {
         val safeParent = if (parent.isBlank()) "\u5f85\u5206\u7c7b" else parent.trim()
         val safeChild = if (child.isBlank()) "\u81ea\u52a8\u8bc6\u522b" else child.trim()
         val autoType = type.name
         val occurredAt = occurredAtEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
-        if (hasRecentAutoDuplicate(amountCents, autoType, source, occurredAt)) {
-            return@withContext null
+        val receivedAt = System.currentTimeMillis()
+        val db = dbHelper.writableDatabase
+
+        // Same-source dedupe: only when transaction reference exists (fingerprint != null).
+        if (!fingerprint.isNullOrBlank() && existsByFingerprint(fingerprint)) {
+            return@withContext AutoTransactionInsertResult(
+                insertedId = null,
+                reason = "SAME_SOURCE_DUPLICATE_BY_TXN_REF",
+                shouldNotify = false
+            )
+        }
+
+        // Cross-source dedupe: link the secondary channel record as non-accounting duplicate.
+        val linkedAnchorId = findCrossSourceAnchorId(
+            amountCents = amountCents,
+            type = autoType,
+            source = source,
+            occurredAtEpochMs = occurredAt
+        )
+        val finalStatus = if (linkedAnchorId != null) STATUS_LINKED_DUPLICATE else STATUS_PENDING
+        val finalNote = if (linkedAnchorId != null) {
+            "$note [跨源关联->#$linkedAnchorId]"
+        } else {
+            note
         }
         val values = ContentValues().apply {
             put("amount_cents", amountCents)
@@ -307,13 +336,13 @@ class CoinNestRepository(context: Context) {
             put("parent_category", safeParent)
             put("child_category", safeChild)
             put("source", source)
-            put("note", note)
+            put("note", finalNote)
             put("occurred_at_epoch_ms", occurredAt)
-            put("created_at_epoch_ms", System.currentTimeMillis())
-            put("status", STATUS_PENDING)
+            put("created_at_epoch_ms", receivedAt)
+            put("status", finalStatus)
             put("fingerprint", fingerprint)
         }
-        val insertedId = dbHelper.writableDatabase.insertWithOnConflict(
+        val insertedId = db.insertWithOnConflict(
             "transactions",
             null,
             values,
@@ -321,51 +350,95 @@ class CoinNestRepository(context: Context) {
         )
         if (insertedId != -1L) {
             notifyChanged()
-            insertedId
+            AutoTransactionInsertResult(
+                insertedId = insertedId,
+                reason = if (linkedAnchorId != null) "CROSS_SOURCE_LINKED" else "INSERTED",
+                shouldNotify = linkedAnchorId == null
+            )
         } else {
-            null
+            AutoTransactionInsertResult(
+                insertedId = null,
+                reason = "DUPLICATE_OR_CONFLICT",
+                shouldNotify = false
+            )
         }
     }
 
-    private fun hasRecentAutoDuplicate(
-        amountCents: Long,
-        type: String,
-        source: String,
-        occurredAtEpochMs: Long
-    ): Boolean {
-        val windowMs = 120_000L
+    private fun existsByFingerprint(fingerprint: String): Boolean {
         val cursor = dbHelper.readableDatabase.rawQuery(
             """
             SELECT id
             FROM transactions
+            WHERE fingerprint = ?
+              AND status != ?
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(fingerprint, STATUS_IGNORED)
+        )
+        return cursor.use { it.moveToFirst() }
+    }
+
+    private fun findCrossSourceAnchorId(
+        amountCents: Long,
+        type: String,
+        source: String,
+        occurredAtEpochMs: Long
+    ): Long? {
+        val normalizedSource = source.uppercase()
+        if (normalizedSource !in setOf("BANK_CARD", "CREDIT_CARD", "UNIONPAY")) {
+            return null
+        }
+        val counterpartSources = setOf("ALIPAY", "WECHAT")
+        if (counterpartSources.isEmpty()) return null
+        val windowMs = 90_000L
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT id, source
+            FROM transactions
             WHERE amount_cents = ?
               AND type = ?
-              AND source = ?
-              AND status != ?
+              AND status IN (?, ?)
+              AND occurred_at_epoch_ms <= ?
               AND ABS(occurred_at_epoch_ms - ?) <= ?
             ORDER BY occurred_at_epoch_ms DESC
-            LIMIT 1
+            LIMIT 30
             """.trimIndent(),
             arrayOf(
                 amountCents.toString(),
                 type,
-                source,
-                STATUS_IGNORED,
+                STATUS_PENDING,
+                STATUS_CONFIRMED,
+                occurredAtEpochMs.toString(),
                 occurredAtEpochMs.toString(),
                 windowMs.toString()
             )
         )
-        return cursor.use { it.moveToFirst() }
+        return cursor.use { c ->
+            while (c.moveToNext()) {
+                val candidateSource = c.getString(c.getColumnIndexOrThrow("source")).orEmpty().uppercase()
+                if (counterpartSources.contains(candidateSource)) {
+                    return@use c.getLong(c.getColumnIndexOrThrow("id"))
+                }
+            }
+            null
+        }
+    }
+
+    private fun counterpartSourceSet(source: String): Set<String> {
+        return when (source.uppercase()) {
+            "BANK_CARD", "CREDIT_CARD", "UNIONPAY" -> setOf("ALIPAY", "WECHAT")
+            else -> emptySet()
+        }
     }
 
     suspend fun addAutoExpense(
         amountCents: Long,
         source: String,
         note: String,
-        fingerprint: String,
+        fingerprint: String?,
         parent: String = "\u5f85\u5206\u7c7b",
         child: String = "\u81ea\u52a8\u8bc6\u522b"
-    ): Long? {
+    ): AutoTransactionInsertResult {
         return addAutoTransaction(
             amountCents = amountCents,
             type = TransactionType.EXPENSE,
