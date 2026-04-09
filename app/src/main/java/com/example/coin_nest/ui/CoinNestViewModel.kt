@@ -38,7 +38,20 @@ data class HomeUiState(
     val todayTransactions: List<TransactionEntity> = emptyList(),
     val monthTransactions: List<TransactionEntity> = emptyList(),
     val yearTransactions: List<TransactionEntity> = emptyList(),
-    val pendingAutoTransactions: List<TransactionEntity> = emptyList()
+    val pendingAutoTransactions: List<TransactionEntity> = emptyList(),
+    val smartLearningStatus: SmartLearningStatus = SmartLearningStatus()
+)
+
+data class SmartLearningKeyword(
+    val keyword: String,
+    val hitCount: Int,
+    val categoryPath: String
+)
+
+data class SmartLearningStatus(
+    val totalRules: Int = 0,
+    val highConfidenceRules: Int = 0,
+    val topKeywords: List<SmartLearningKeyword> = emptyList()
 )
 
 private data class SummaryAndCategory(
@@ -105,6 +118,7 @@ class CoinNestViewModel(
         )
     }
     private val summaryAndCategoryFlow = summaryAndCategoryBaseFlow
+    private val smartRuleFlow = repository.observeSmartCategoryRules(limit = 300)
 
     private val selectedMonthSummaryFlow = selectedMonthFlow.flatMapLatest { ym ->
         val range = DateRangeUtils.monthRange(ym)
@@ -141,7 +155,7 @@ class CoinNestViewModel(
         )
     }
 
-    val uiState: StateFlow<HomeUiState> = combine(
+    private val baseUiStateFlow = combine(
         summaryAndCategoryFlow,
         repository.observeTransactionsInRange(dayRange.first, dayRange.last + 1, limit = 200),
         repository.observeTransactionsInRange(yearRange.first, yearRange.last + 1, limit = 12000),
@@ -164,6 +178,13 @@ class CoinNestViewModel(
             yearTransactions = yearTxs,
             pendingAutoTransactions = pendingTxs
         )
+    }
+
+    val uiState: StateFlow<HomeUiState> = combine(
+        baseUiStateFlow,
+        smartRuleFlow
+    ) { base, smartRules ->
+        base.copy(smartLearningStatus = buildSmartLearningStatus(smartRules))
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
     init {
@@ -276,6 +297,36 @@ class CoinNestViewModel(
                 .onSuccess { (txCount, catCount) -> onResult(txCount, catCount) }
                 .onFailure { onError(it.message ?: "瀵煎叆澶辫触") }
         }
+    }
+
+    fun clearSmartLearningRules() {
+        viewModelScope.launch {
+            repository.clearSmartCategoryRules()
+        }
+    }
+
+    private fun buildSmartLearningStatus(
+        rules: List<com.example.coin_nest.data.db.SmartCategoryRuleEntity>
+    ): SmartLearningStatus {
+        if (rules.isEmpty()) return SmartLearningStatus()
+        val topKeywords = rules
+            .groupBy { it.keyword }
+            .map { (keyword, groupedRules) ->
+                val totalHit = groupedRules.sumOf { it.hitCount }
+                val topRule = groupedRules.maxByOrNull { it.hitCount } ?: groupedRules.first()
+                SmartLearningKeyword(
+                    keyword = keyword,
+                    hitCount = totalHit,
+                    categoryPath = "${topRule.parentCategory}/${topRule.childCategory}"
+                )
+            }
+            .sortedByDescending { it.hitCount }
+            .take(5)
+        return SmartLearningStatus(
+            totalRules = rules.size,
+            highConfidenceRules = rules.count { it.hitCount >= 3 },
+            topKeywords = topKeywords
+        )
     }
 
 }

@@ -36,3 +36,14 @@ data class CategoryBudgetEntity(
     val childCategory: String,
     val limitCents: Long
 )
+
+data class SmartCategoryRuleEntity(
+    val id: Long = 0L,
+    val type: String,
+    val source: String,
+    val keyword: String,
+    val parentCategory: String,
+    val childCategory: String,
+    val hitCount: Int,
+    val updatedAtEpochMs: Long
+)

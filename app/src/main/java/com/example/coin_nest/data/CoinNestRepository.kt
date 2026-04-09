@@ -10,6 +10,7 @@ import com.example.coin_nest.data.db.STATUS_CONFIRMED
 import com.example.coin_nest.data.db.STATUS_IGNORED
 import com.example.coin_nest.data.db.STATUS_LINKED_DUPLICATE
 import com.example.coin_nest.data.db.STATUS_PENDING
+import com.example.coin_nest.data.db.SmartCategoryRuleEntity
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.data.model.BalanceSummary
 import com.example.coin_nest.data.model.BackupPayload
@@ -28,6 +29,13 @@ data class AutoTransactionInsertResult(
     val insertedId: Long?,
     val reason: String,
     val shouldNotify: Boolean
+)
+
+private data class SmartCategorySuggestion(
+    val parentCategory: String,
+    val childCategory: String,
+    val keyword: String,
+    val hitCount: Int
 )
 
 class CoinNestRepository(context: Context) {
@@ -74,6 +82,14 @@ class CoinNestRepository(context: Context) {
         return changeTick.map {
             withContext(Dispatchers.IO) {
                 queryCategories().map { row -> CategoryItem(row.parent, row.child) }
+            }
+        }
+    }
+
+    fun observeSmartCategoryRules(limit: Int = 200): Flow<List<SmartCategoryRuleEntity>> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryAllSmartCategoryRules(limit = limit)
             }
         }
     }
@@ -184,11 +200,19 @@ class CoinNestRepository(context: Context) {
         childCategory: String
     ) = withContext(Dispatchers.IO) {
         if (parentCategory.isBlank() || childCategory.isBlank()) return@withContext
+        val txBeforeUpdate = queryTransactionById(id)
         val values = ContentValues().apply {
             put("parent_category", parentCategory.trim())
             put("child_category", childCategory.trim())
         }
         dbHelper.writableDatabase.update("transactions", values, "id = ?", arrayOf(id.toString()))
+        txBeforeUpdate?.let { tx ->
+            learnSmartCategoryRuleFromUserCorrection(
+                tx = tx,
+                targetParent = parentCategory.trim(),
+                targetChild = childCategory.trim()
+            )
+        }
         notifyChanged()
     }
 
@@ -202,7 +226,8 @@ class CoinNestRepository(context: Context) {
             transactions = queryAllTransactions(),
             categories = queryCategories().map { CategoryItem(it.parent, it.child) },
             budgets = queryAllBudgets(),
-            categoryBudgets = queryAllCategoryBudgets()
+            categoryBudgets = queryAllCategoryBudgets(),
+            smartCategoryRules = queryAllSmartCategoryRules()
         )
         toJson(payload)
     }
@@ -219,6 +244,7 @@ class CoinNestRepository(context: Context) {
                 db.delete("categories", null, null)
                 db.delete("monthly_budget", null, null)
                 db.delete("category_budget", null, null)
+                db.delete("smart_category_rule", null, null)
             }
 
             parsed.categories.forEach { cat ->
@@ -262,6 +288,18 @@ class CoinNestRepository(context: Context) {
                     put("limit_cents", budget.limitCents)
                 }
                 db.insertWithOnConflict("category_budget", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            parsed.smartCategoryRules.forEach { rule ->
+                val values = ContentValues().apply {
+                    put("type", rule.type)
+                    put("source", rule.source)
+                    put("keyword", rule.keyword)
+                    put("parent_category", rule.parentCategory)
+                    put("child_category", rule.childCategory)
+                    put("hit_count", rule.hitCount)
+                    put("updated_at_epoch_ms", rule.updatedAtEpochMs)
+                }
+                db.insertWithOnConflict("smart_category_rule", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
             }
             db.setTransactionSuccessful()
         } finally {
@@ -323,6 +361,11 @@ class CoinNestRepository(context: Context) {
         notifyChanged()
     }
 
+    suspend fun clearSmartCategoryRules() = withContext(Dispatchers.IO) {
+        dbHelper.writableDatabase.delete("smart_category_rule", null, null)
+        notifyChanged()
+    }
+
     suspend fun currentMonthBudgetUsage(
         monthKey: String,
         startInclusive: Long,
@@ -372,13 +415,30 @@ class CoinNestRepository(context: Context) {
         } else {
             note
         }
+        val smartSuggestion = suggestSmartCategory(
+            type = autoType,
+            source = source,
+            note = finalNote
+        )
+        val shouldApplySmartCategory = smartSuggestion != null && (
+            safeParent == "\u5f85\u5206\u7c7b" ||
+                safeChild == "\u81ea\u52a8\u8bc6\u522b" ||
+                smartSuggestion.hitCount >= 3
+            )
+        val finalParentCategory = if (shouldApplySmartCategory) smartSuggestion!!.parentCategory else safeParent
+        val finalChildCategory = if (shouldApplySmartCategory) smartSuggestion!!.childCategory else safeChild
+        val noteWithSmartTag = appendSmartHitTag(
+            originalNote = finalNote,
+            suggestion = smartSuggestion,
+            applied = shouldApplySmartCategory
+        )
         val values = ContentValues().apply {
             put("amount_cents", amountCents)
             put("type", autoType)
-            put("parent_category", safeParent)
-            put("child_category", safeChild)
+            put("parent_category", finalParentCategory)
+            put("child_category", finalChildCategory)
             put("source", source)
-            put("note", finalNote)
+            put("note", noteWithSmartTag)
             put("occurred_at_epoch_ms", occurredAt)
             put("created_at_epoch_ms", receivedAt)
             put("status", finalStatus)
@@ -491,6 +551,215 @@ class CoinNestRepository(context: Context) {
             parent = parent,
             child = child
         )
+    }
+
+    private fun isLearnableAutoSource(source: String): Boolean {
+        return source.uppercase() in setOf(
+            "ALIPAY", "WECHAT", "BANK_CARD", "CREDIT_CARD", "UNIONPAY", "AUTO_NOTIFY"
+        )
+    }
+
+    private fun queryTransactionById(id: Long): TransactionEntity? {
+        val cursor = dbHelper.readableDatabase.query(
+            "transactions",
+            null,
+            "id = ?",
+            arrayOf(id.toString()),
+            null,
+            null,
+            null,
+            "1"
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) {
+                TransactionEntity(
+                    id = c.getLong(c.getColumnIndexOrThrow("id")),
+                    amountCents = c.getLong(c.getColumnIndexOrThrow("amount_cents")),
+                    type = c.getString(c.getColumnIndexOrThrow("type")),
+                    parentCategory = c.getString(c.getColumnIndexOrThrow("parent_category")),
+                    childCategory = c.getString(c.getColumnIndexOrThrow("child_category")),
+                    source = c.getString(c.getColumnIndexOrThrow("source")),
+                    note = c.getString(c.getColumnIndexOrThrow("note")),
+                    occurredAtEpochMs = c.getLong(c.getColumnIndexOrThrow("occurred_at_epoch_ms")),
+                    createdAtEpochMs = c.getLong(c.getColumnIndexOrThrow("created_at_epoch_ms")),
+                    status = c.getString(c.getColumnIndexOrThrow("status")),
+                    fingerprint = c.getString(c.getColumnIndexOrThrow("fingerprint"))
+                )
+            } else {
+                null
+            }
+        }
+    }
+
+    private fun learnSmartCategoryRuleFromUserCorrection(
+        tx: TransactionEntity,
+        targetParent: String,
+        targetChild: String
+    ) {
+        if (!isLearnableAutoSource(tx.source)) return
+        if (targetParent.isBlank() || targetChild.isBlank()) return
+        val keywords = extractSmartKeywords(tx.note, tx.source)
+        if (keywords.isEmpty()) return
+        val db = dbHelper.writableDatabase
+        val now = System.currentTimeMillis()
+        val sourceKey = tx.source.uppercase()
+        keywords.forEach { keyword ->
+            val existingHitCount = querySmartRuleHitCount(
+                type = tx.type,
+                source = sourceKey,
+                keyword = keyword
+            )
+            val values = ContentValues().apply {
+                put("type", tx.type)
+                put("source", sourceKey)
+                put("keyword", keyword)
+                put("parent_category", targetParent)
+                put("child_category", targetChild)
+                put("hit_count", existingHitCount + 1)
+                put("updated_at_epoch_ms", now)
+            }
+            db.insertWithOnConflict(
+                "smart_category_rule",
+                null,
+                values,
+                android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE
+            )
+        }
+    }
+
+    private fun suggestSmartCategory(type: String, source: String, note: String): SmartCategorySuggestion? {
+        val sourceKey = source.uppercase()
+        val rules = querySmartCategoryRules(type = type, source = sourceKey)
+        if (rules.isEmpty()) return null
+        val normalizedNote = normalizeNote(note)
+        return rules
+            .filter { normalizedNote.contains(it.keyword) }
+            .maxWithOrNull(
+                compareByDescending<SmartCategoryRuleEntity> { it.hitCount }
+                    .thenByDescending { it.keyword.length }
+                    .thenByDescending { it.updatedAtEpochMs }
+            )?.let {
+                SmartCategorySuggestion(
+                    parentCategory = it.parentCategory,
+                    childCategory = it.childCategory,
+                    keyword = it.keyword,
+                    hitCount = it.hitCount
+                )
+            }
+    }
+
+    private fun querySmartRuleHitCount(type: String, source: String, keyword: String): Int {
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT hit_count
+            FROM smart_category_rule
+            WHERE type = ? AND source = ? AND keyword = ?
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(type, source, keyword)
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) c.getInt(c.getColumnIndexOrThrow("hit_count")) else 0
+        }
+    }
+
+    private fun querySmartCategoryRules(type: String, source: String): List<SmartCategoryRuleEntity> {
+        val cursor = dbHelper.readableDatabase.query(
+            "smart_category_rule",
+            arrayOf("id", "type", "source", "keyword", "parent_category", "child_category", "hit_count", "updated_at_epoch_ms"),
+            "type = ? AND source = ?",
+            arrayOf(type, source),
+            null,
+            null,
+            "hit_count DESC, updated_at_epoch_ms DESC",
+            "200"
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        SmartCategoryRuleEntity(
+                            id = c.getLong(c.getColumnIndexOrThrow("id")),
+                            type = c.getString(c.getColumnIndexOrThrow("type")),
+                            source = c.getString(c.getColumnIndexOrThrow("source")),
+                            keyword = c.getString(c.getColumnIndexOrThrow("keyword")),
+                            parentCategory = c.getString(c.getColumnIndexOrThrow("parent_category")),
+                            childCategory = c.getString(c.getColumnIndexOrThrow("child_category")),
+                            hitCount = c.getInt(c.getColumnIndexOrThrow("hit_count")),
+                            updatedAtEpochMs = c.getLong(c.getColumnIndexOrThrow("updated_at_epoch_ms"))
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun queryAllSmartCategoryRules(limit: Int? = null): List<SmartCategoryRuleEntity> {
+        val cursor = dbHelper.readableDatabase.query(
+            "smart_category_rule",
+            arrayOf("id", "type", "source", "keyword", "parent_category", "child_category", "hit_count", "updated_at_epoch_ms"),
+            null,
+            null,
+            null,
+            null,
+            "updated_at_epoch_ms DESC",
+            if (limit != null && limit > 0) limit.toString() else null
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        SmartCategoryRuleEntity(
+                            id = c.getLong(c.getColumnIndexOrThrow("id")),
+                            type = c.getString(c.getColumnIndexOrThrow("type")),
+                            source = c.getString(c.getColumnIndexOrThrow("source")),
+                            keyword = c.getString(c.getColumnIndexOrThrow("keyword")),
+                            parentCategory = c.getString(c.getColumnIndexOrThrow("parent_category")),
+                            childCategory = c.getString(c.getColumnIndexOrThrow("child_category")),
+                            hitCount = c.getInt(c.getColumnIndexOrThrow("hit_count")),
+                            updatedAtEpochMs = c.getLong(c.getColumnIndexOrThrow("updated_at_epoch_ms"))
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun extractSmartKeywords(note: String, source: String): List<String> {
+        val normalized = normalizeNote(note)
+        if (normalized.isBlank()) return emptyList()
+        val seedKeywords = listOf(
+            "美团", "外卖", "饿了么", "淘宝", "天猫", "京东", "拼多多",
+            "滴滴", "地铁", "公交", "打车", "酒店", "机票", "火车票",
+            "星巴克", "瑞幸", "麦当劳", "肯德基", "便利店", "超市",
+            "医院", "药店", "话费", "充值", "电费", "水费"
+        )
+        val matched = seedKeywords.filter { normalized.contains(it.lowercase()) }
+        if (matched.isNotEmpty()) return matched.take(3).map { it.lowercase() }
+        val short = normalized.split(" ").firstOrNull { it.length in 2..10 } ?: return listOf(source.lowercase())
+        return listOf(short)
+    }
+
+    private fun normalizeNote(note: String): String {
+        return note.lowercase()
+            .replace(Regex("\\[smart:[^\\]]+\\]"), " ")
+            .replace(Regex("[^\\p{L}\\p{N}\\u4e00-\\u9fa5]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun appendSmartHitTag(
+        originalNote: String,
+        suggestion: SmartCategorySuggestion?,
+        applied: Boolean
+    ): String {
+        if (!applied || suggestion == null) return originalNote
+        val safeKeyword = suggestion.keyword.replace("]", "")
+        val tag = "[SMART:$safeKeyword#${suggestion.hitCount}]"
+        val base = originalNote.trim()
+        if (base.isBlank()) return tag
+        if (base.contains("[SMART:")) return base
+        return "$base $tag"
     }
 
     private fun notifyChanged() {
@@ -756,6 +1025,20 @@ class CoinNestRepository(context: Context) {
         }
         root.put("category_budgets", categoryBudgetArray)
 
+        val smartRuleArray = JSONArray()
+        payload.smartCategoryRules.forEach { rule ->
+            val obj = JSONObject()
+            obj.put("type", rule.type)
+            obj.put("source", rule.source)
+            obj.put("keyword", rule.keyword)
+            obj.put("parent_category", rule.parentCategory)
+            obj.put("child_category", rule.childCategory)
+            obj.put("hit_count", rule.hitCount)
+            obj.put("updated_at_epoch_ms", rule.updatedAtEpochMs)
+            smartRuleArray.put(obj)
+        }
+        root.put("smart_category_rules", smartRuleArray)
+
         return root.toString()
     }
 
@@ -809,11 +1092,26 @@ class CoinNestRepository(context: Context) {
                 limitCents = obj.optLong("limit_cents", 0L)
             )
         }
+        val smartRules = mutableListOf<SmartCategoryRuleEntity>()
+        val smartRuleArray = root.optJSONArray("smart_category_rules") ?: JSONArray()
+        for (i in 0 until smartRuleArray.length()) {
+            val obj = smartRuleArray.getJSONObject(i)
+            smartRules += SmartCategoryRuleEntity(
+                type = obj.optString("type", "EXPENSE"),
+                source = obj.optString("source", "AUTO_NOTIFY"),
+                keyword = obj.optString("keyword", ""),
+                parentCategory = obj.optString("parent_category", "待分类"),
+                childCategory = obj.optString("child_category", "自动识别"),
+                hitCount = obj.optInt("hit_count", 1),
+                updatedAtEpochMs = obj.optLong("updated_at_epoch_ms", System.currentTimeMillis())
+            )
+        }
         return BackupPayload(
             transactions = txList,
             categories = categories,
             budgets = budgets,
-            categoryBudgets = categoryBudgets
+            categoryBudgets = categoryBudgets,
+            smartCategoryRules = smartRules
         )
     }
 

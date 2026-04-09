@@ -64,6 +64,22 @@ class CoinNestDbHelper(context: Context) : SQLiteOpenHelper(
             )
             """.trimIndent()
         )
+
+        db.execSQL(
+            """
+            CREATE TABLE smart_category_rule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                parent_category TEXT NOT NULL,
+                child_category TEXT NOT NULL,
+                hit_count INTEGER NOT NULL DEFAULT 1,
+                updated_at_epoch_ms INTEGER NOT NULL,
+                UNIQUE(type, source, keyword)
+            )
+            """.trimIndent()
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -95,10 +111,27 @@ class CoinNestDbHelper(context: Context) : SQLiteOpenHelper(
         if (oldVersion < 6) {
             // Keep forward-only DB version to avoid downgrade crash on upgraded devices.
         }
+        if (oldVersion < 7) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS smart_category_rule (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    keyword TEXT NOT NULL,
+                    parent_category TEXT NOT NULL,
+                    child_category TEXT NOT NULL,
+                    hit_count INTEGER NOT NULL DEFAULT 1,
+                    updated_at_epoch_ms INTEGER NOT NULL,
+                    UNIQUE(type, source, keyword)
+                )
+                """.trimIndent()
+            )
+        }
     }
 
     companion object {
         private const val DB_NAME = "coin_nest_sqlite.db"
-        private const val DB_VERSION = 6
+        private const val DB_VERSION = 7
     }
 }

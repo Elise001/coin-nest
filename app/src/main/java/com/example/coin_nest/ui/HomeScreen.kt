@@ -96,6 +96,7 @@ fun HomeScreen(
     onSetMonthBudget: (String) -> Unit,
     onSetCategoryBudget: (String, String, String) -> Unit,
     onExportBackup: (onResult: (String) -> Unit, onError: (String) -> Unit) -> Unit,
+    onClearSmartRules: () -> Unit,
     onImportBackup: (
         json: String,
         replaceExisting: Boolean,
@@ -150,6 +151,7 @@ fun HomeScreen(
                     onSetMonthBudget = onSetMonthBudget,
                     onSetCategoryBudget = onSetCategoryBudget,
                     onExportBackup = onExportBackup,
+                    onClearSmartRules = onClearSmartRules,
                     onImportBackup = onImportBackup
                 )
             }
@@ -1127,6 +1129,7 @@ private fun SettingsTab(
     onSetMonthBudget: (String) -> Unit,
     onSetCategoryBudget: (String, String, String) -> Unit,
     onExportBackup: (onResult: (String) -> Unit, onError: (String) -> Unit) -> Unit,
+    onClearSmartRules: () -> Unit,
     onImportBackup: (
         json: String,
         replaceExisting: Boolean,
@@ -1147,6 +1150,7 @@ private fun SettingsTab(
     var categoryBudgetAmount by rememberSaveable { mutableStateOf("") }
     var backupJsonInput by rememberSaveable { mutableStateOf("") }
     var replaceExisting by rememberSaveable { mutableStateOf(false) }
+    var showClearSmartRuleConfirm by rememberSaveable { mutableStateOf(false) }
     var autoBookHealthRefreshTick by rememberSaveable { mutableIntStateOf(0) }
     val autoBookHealth = remember(autoBookHealthRefreshTick) { getAutoBookHealthStatus(context) }
     val canUpdateBudget = remember(budget) {
@@ -1268,6 +1272,12 @@ private fun SettingsTab(
                     )
                 ) { Text("允许后台保活（可选）") }
             }
+        }
+        item {
+            SmartLearningStatusCard(
+                status = state.smartLearningStatus,
+                onClearRules = { showClearSmartRuleConfirm = true }
+            )
         }
         item {
             GlassCard {
@@ -1449,6 +1459,62 @@ private fun SettingsTab(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("导入本地备份") }
             }
+        }
+    }
+
+    if (showClearSmartRuleConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearSmartRuleConfirm = false },
+            title = { Text("清空学习规则？") },
+            text = { Text("此操作会删除本地智能分类学习结果，但不会删除已有流水。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearSmartRules()
+                        showClearSmartRuleConfirm = false
+                        Toast.makeText(context, "已清空智能分类学习规则", Toast.LENGTH_SHORT).show()
+                    }
+                ) { Text("确认清空") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearSmartRuleConfirm = false }) { Text("取消") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SmartLearningStatusCard(
+    status: SmartLearningStatus,
+    onClearRules: () -> Unit
+) {
+    GlassCard {
+        Text("智能分类学习状态", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(8.dp))
+        if (status.totalRules <= 0) {
+            Text("当前暂无学习规则。先在流水里手动改几次分类，系统会自动学习。")
+            return@GlassCard
+        }
+        Text("已学习规则：${status.totalRules} 条")
+        Text("高置信规则（命中≥3）：${status.highConfidenceRules} 条")
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "高频关键词",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        status.topKeywords.forEach { item ->
+            Text(
+                "• ${item.keyword}（${item.hitCount}）→ ${item.categoryPath}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onClearRules, modifier = Modifier.fillMaxWidth()) {
+            Text("清空学习规则")
         }
     }
 }
@@ -1745,6 +1811,8 @@ private fun PendingTransactionRow(
     onConfirm: () -> Unit,
     onIgnore: () -> Unit
 ) {
+    val smartTag = remember(tx.note) { parseSmartTag(tx.note) }
+    val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEAD0)),
@@ -1755,7 +1823,16 @@ private fun PendingTransactionRow(
             val txLabel = if (tx.type == "INCOME") "收入" else "支出"
             Text("待确认$txLabel $prefix${MoneyFormat.fromCents(tx.amountCents)}", fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(2.dp))
-            Text("${tx.source}  ${tx.note}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            val notePart = if (displayNote.isBlank()) "" else "  $displayNote"
+            Text("${tx.source}$notePart", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            if (!smartTag.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    "智能命中：$smartTag",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF2E7D32)
+                )
+            }
             Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onIgnore, modifier = Modifier.weight(1f)) { Text("取消") }
@@ -1777,6 +1854,8 @@ private fun TransactionRow(
     val amountColor = if (tx.type == "INCOME") Color(0xFF2E7D32) else Color(0xFFB23A30)
     val sourceLabel = formatSourceLabel(tx.source)
     val timeText = remember(tx.occurredAtEpochMs) { Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter) }
+    val smartTag = remember(tx.note) { parseSmartTag(tx.note) }
+    val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
     Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF2DE)), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text(
@@ -1786,8 +1865,15 @@ private fun TransactionRow(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text("来源：$sourceLabel  时间：$timeText")
-            if (tx.note.isNotBlank()) {
-                Text("备注：${tx.note}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (displayNote.isNotBlank()) {
+                Text("备注：$displayNote", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (!smartTag.isNullOrBlank()) {
+                Text(
+                    "智能命中：$smartTag",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF2E7D32)
+                )
             }
             if (allowCategoryEdit || onDelete != null) {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1810,6 +1896,11 @@ private fun TransactionRow(
             }
         }
     }
+}
+
+private fun parseSmartTag(note: String): String? {
+    val match = Regex("\\[SMART:([^\\]]+)\\]").find(note) ?: return null
+    return match.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() }
 }
 
 @Composable
