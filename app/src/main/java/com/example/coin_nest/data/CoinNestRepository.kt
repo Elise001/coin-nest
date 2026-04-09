@@ -755,6 +755,7 @@ class CoinNestRepository(context: Context) {
             categoryBudgetArray.put(obj)
         }
         root.put("category_budgets", categoryBudgetArray)
+
         return root.toString()
     }
 

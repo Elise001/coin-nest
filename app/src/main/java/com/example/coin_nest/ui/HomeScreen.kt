@@ -12,6 +12,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -135,7 +137,12 @@ fun HomeScreen(
 
         Box(modifier = Modifier.weight(1f)) {
             when (mainTabs[selectedMainTab]) {
-                MainTab.Overview -> OverviewScreen(state, onSelectMonth, onUpdateTransactionCategory, onDeleteTransaction)
+                MainTab.Overview -> OverviewScreen(
+                    state = state,
+                    onSelectMonth = onSelectMonth,
+                    onUpdateTransactionCategory = onUpdateTransactionCategory,
+                    onDeleteTransaction = onDeleteTransaction
+                )
                 MainTab.Record -> RecordTab(state, onAddTransaction, onConfirmPendingAuto, onIgnorePendingAuto)
                 MainTab.Settings -> SettingsTab(
                     state = state,
@@ -201,6 +208,7 @@ private fun OverviewScreen(
     var editChildExpanded by rememberSaveable { mutableStateOf(false) }
     var editParent by rememberSaveable { mutableStateOf("") }
     var editChild by rememberSaveable { mutableStateOf("") }
+    var selectedAnomaly by remember { mutableStateOf<AnomalyInsight?>(null) }
     var selectedWeekStart by rememberSaveable { mutableStateOf(LocalDate.now().minusDays((LocalDate.now().dayOfWeek.value - 1).toLong())) }
     val selectedMonth = state.selectedMonth
     val today = remember { LocalDate.now() }
@@ -330,7 +338,12 @@ private fun OverviewScreen(
         }
         item { FocusInsightCard(lines = focusInsights) }
         if (anomalies.isNotEmpty()) {
-            item { AnomalyRadarCard(anomalies = anomalies) }
+            item {
+                AnomalyRadarCard(
+                    anomalies = anomalies,
+                    onOpenDetail = { selectedAnomaly = it }
+                )
+            }
         }
 
         when (mode) {
@@ -552,6 +565,12 @@ private fun OverviewScreen(
                     deleteTx = null
                 }) { Text("删除", color = Color(0xFFB23A30)) }
             }
+        )
+    }
+    if (selectedAnomaly != null) {
+        AnomalyDetailDialog(
+            anomaly = selectedAnomaly!!,
+            onDismiss = { selectedAnomaly = null }
         )
     }
 }
@@ -1447,7 +1466,10 @@ private fun FocusInsightCard(lines: List<String>) {
 }
 
 @Composable
-private fun AnomalyRadarCard(anomalies: List<AnomalyInsight>) {
+private fun AnomalyRadarCard(
+    anomalies: List<AnomalyInsight>,
+    onOpenDetail: (AnomalyInsight) -> Unit
+) {
     GlassCard {
         Text("异常消费雷达", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(6.dp))
@@ -1459,8 +1481,73 @@ private fun AnomalyRadarCard(anomalies: List<AnomalyInsight>) {
             }
             Text(anomaly.title, fontWeight = FontWeight.Medium, color = tagColor)
             Text(anomaly.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "查看异常详情",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.clickable { onOpenDetail(anomaly) }
+            )
             Spacer(modifier = Modifier.height(6.dp))
         }
+    }
+}
+
+@Composable
+private fun AnomalyDetailDialog(
+    anomaly: AnomalyInsight,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
+        title = {
+            Column {
+                Text(anomaly.title, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "风险等级：${levelLabel(anomaly.level)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("异常说明", fontWeight = FontWeight.Medium)
+                Text(anomaly.detail, style = MaterialTheme.typography.bodySmall)
+                Text("触发规则：${anomaly.reason}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                Text("建议动作", fontWeight = FontWeight.Medium)
+                anomaly.suggestions.forEach { action ->
+                    Text("• $action", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                if (anomaly.relatedTransactions.isNotEmpty()) {
+                    Text("相关记录（最多5条）", fontWeight = FontWeight.Medium)
+                    anomaly.relatedTransactions.take(5).forEach { tx ->
+                        val sign = if (tx.type == "INCOME") "+" else "-"
+                        val time = Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter)
+                        Text(
+                            "$sign${MoneyFormat.fromCents(tx.amountCents)}  ${tx.parentCategory}/${tx.childCategory}  $time",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+    )
+}
+
+private fun levelLabel(level: String): String {
+    return when (level) {
+        "HIGH" -> "高"
+        "MEDIUM" -> "中"
+        else -> "低"
     }
 }
 

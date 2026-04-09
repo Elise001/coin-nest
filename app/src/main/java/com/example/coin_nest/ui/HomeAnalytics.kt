@@ -132,9 +132,13 @@ internal fun buildReportSnapshot(
 }
 
 internal data class AnomalyInsight(
+    val id: String,
     val title: String,
     val detail: String,
-    val level: String
+    val level: String,
+    val reason: String,
+    val suggestions: List<String>,
+    val relatedTransactions: List<TransactionEntity>
 )
 
 internal fun buildMonthlyAnomalies(
@@ -153,9 +157,13 @@ internal fun buildMonthlyAnomalies(
     val maxTx = expenseTx.maxByOrNull { it.amountCents }
     if (maxTx != null && maxTx.amountCents >= maxOf(200_00L, avgExpense * 4)) {
         anomalies += AnomalyInsight(
+            id = "LARGE_SINGLE_${maxTx.id}",
             title = "出现大额单笔支出",
             detail = "${maxTx.parentCategory}/${maxTx.childCategory} 单笔 ${MoneyFormat.fromCents(maxTx.amountCents)}，显著高于本月均值。",
-            level = "HIGH"
+            level = "HIGH",
+            reason = "单笔金额超过本月平均支出的 4 倍，或超过 200 元阈值。",
+            suggestions = listOf("回看这笔支出的必要性", "如属于可控消费，下周设置同类日上限"),
+            relatedTransactions = listOf(maxTx)
         )
     }
 
@@ -164,9 +172,13 @@ internal fun buildMonthlyAnomalies(
         val ratio = kotlin.math.abs(delta).toDouble() / previousMonthExpenseCents.toDouble()
         if (delta > 0L && ratio >= 0.3) {
             anomalies += AnomalyInsight(
+                id = "MONTHLY_SURGE",
                 title = "月支出较上月明显上涨",
                 detail = "本月较上月上涨 ${(ratio * 100).roundToInt()}%（+${MoneyFormat.fromCents(delta)}）。",
-                level = "MEDIUM"
+                level = "MEDIUM",
+                reason = "当月总支出较上月增幅达到 30% 以上。",
+                suggestions = listOf("优先查看本月 Top 分类与大额流水", "为高频分类加预算约束"),
+                relatedTransactions = expenseTx.sortedByDescending { it.amountCents }.take(5)
             )
         }
     }
@@ -177,9 +189,15 @@ internal fun buildMonthlyAnomalies(
         val ratio = topParent.value.toDouble() / totalExpense.toDouble()
         if (ratio >= 0.45 && topParent.value >= 500_00L) {
             anomalies += AnomalyInsight(
+                id = "CATEGORY_CONCENTRATION_${topParent.key}",
                 title = "支出集中在单一分类",
                 detail = "${topParent.key} 占比 ${(ratio * 100).roundToInt()}%，存在结构性风险。",
-                level = "MEDIUM"
+                level = "MEDIUM",
+                reason = "单一一级分类占比超过 45%，且金额已超过 500 元。",
+                suggestions = listOf("检查该分类是否出现短期冲动消费", "把该分类设为重点预算监控项"),
+                relatedTransactions = expenseTx.filter { it.parentCategory == topParent.key }
+                    .sortedByDescending { it.amountCents }
+                    .take(5)
             )
         }
     }
@@ -188,15 +206,23 @@ internal fun buildMonthlyAnomalies(
         val ratio = totalExpense.toDouble() / monthBudgetCents.toDouble()
         if (ratio >= 1.0) {
             anomalies += AnomalyInsight(
+                id = "MONTH_BUDGET_EXCEEDED",
                 title = "总预算已超额",
                 detail = "本月支出 ${MoneyFormat.fromCents(totalExpense)} / 预算 ${MoneyFormat.fromCents(monthBudgetCents)}。",
-                level = "HIGH"
+                level = "HIGH",
+                reason = "总预算使用率已达到或超过 100%。",
+                suggestions = listOf("本周仅保留必要支出", "暂停非必要高频消费场景"),
+                relatedTransactions = expenseTx.sortedByDescending { it.amountCents }.take(5)
             )
         } else if (ratio >= 0.8) {
             anomalies += AnomalyInsight(
+                id = "MONTH_BUDGET_WARN",
                 title = "总预算接近上限",
                 detail = "预算使用率 ${(ratio * 100).roundToInt()}%，建议控制接下来一周支出。",
-                level = "LOW"
+                level = "LOW",
+                reason = "总预算使用率达到 80% 预警阈值。",
+                suggestions = listOf("接下来 3-7 天优先控制可选消费", "保持自动记账，避免漏记导致误判"),
+                relatedTransactions = expenseTx.sortedByDescending { it.amountCents }.take(5)
             )
         }
     }
@@ -208,9 +234,15 @@ internal fun buildMonthlyAnomalies(
             val used = categoryExpenseMap[budget.parentCategory to budget.childCategory] ?: 0L
             if (budget.limitCents > 0L && used > budget.limitCents) {
                 anomalies += AnomalyInsight(
+                    id = "CATEGORY_BUDGET_EXCEEDED_${budget.parentCategory}_${budget.childCategory}",
                     title = "分类预算超额：${budget.parentCategory}/${budget.childCategory}",
                     detail = "已用 ${MoneyFormat.fromCents(used)} / 预算 ${MoneyFormat.fromCents(budget.limitCents)}。",
-                    level = "HIGH"
+                    level = "HIGH",
+                    reason = "该二级分类月度支出已超过设定预算。",
+                    suggestions = listOf("本月暂停该分类非刚需支出", "下月重新评估该分类预算上限"),
+                    relatedTransactions = expenseTx.filter {
+                        it.parentCategory == budget.parentCategory && it.childCategory == budget.childCategory
+                    }.sortedByDescending { it.amountCents }.take(5)
                 )
             }
         }

@@ -92,10 +92,13 @@ class CoinNestDbHelper(context: Context) : SQLiteOpenHelper(
                 """.trimIndent()
             )
         }
+        if (oldVersion < 6) {
+            // Keep forward-only DB version to avoid downgrade crash on upgraded devices.
+        }
     }
 
     companion object {
         private const val DB_NAME = "coin_nest_sqlite.db"
-        private const val DB_VERSION = 5
+        private const val DB_VERSION = 6
     }
 }

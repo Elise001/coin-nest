@@ -86,7 +86,7 @@ class CoinNestViewModel(
         arrayOf(daily, monthly, yearly, previousYearly, budget)
     }
 
-    private val summaryAndCategoryFlow = combine(
+    private val summaryAndCategoryBaseFlow = combine(
         summaryBaseFlow,
         repository.observeCategories()
     ) { base, categories ->
@@ -104,6 +104,7 @@ class CoinNestViewModel(
             categories = categories
         )
     }
+    private val summaryAndCategoryFlow = summaryAndCategoryBaseFlow
 
     private val selectedMonthSummaryFlow = selectedMonthFlow.flatMapLatest { ym ->
         val range = DateRangeUtils.monthRange(ym)
@@ -222,6 +223,7 @@ class CoinNestViewModel(
             )
         }
     }
+
 
     fun selectMonth(month: YearMonth) {
         selectedMonthFlow.value = month
