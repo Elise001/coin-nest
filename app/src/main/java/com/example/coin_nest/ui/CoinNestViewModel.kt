@@ -39,7 +39,8 @@ data class HomeUiState(
     val monthTransactions: List<TransactionEntity> = emptyList(),
     val yearTransactions: List<TransactionEntity> = emptyList(),
     val pendingAutoTransactions: List<TransactionEntity> = emptyList(),
-    val smartLearningStatus: SmartLearningStatus = SmartLearningStatus()
+    val smartLearningStatus: SmartLearningStatus = SmartLearningStatus(),
+    val retentionFeedback: RetentionFeedbackState = RetentionFeedbackState()
 )
 
 data class SmartLearningKeyword(
@@ -52,6 +53,14 @@ data class SmartLearningStatus(
     val totalRules: Int = 0,
     val highConfidenceRules: Int = 0,
     val topKeywords: List<SmartLearningKeyword> = emptyList()
+)
+
+data class RetentionFeedbackState(
+    val currentStreakDays: Int = 0,
+    val longestStreakDays: Int = 0,
+    val activeDaysInSelectedMonth: Int = 0,
+    val unlockedBadges: List<String> = emptyList(),
+    val celebrationMessage: String? = null
 )
 
 private data class SummaryAndCategory(
@@ -119,6 +128,7 @@ class CoinNestViewModel(
     }
     private val summaryAndCategoryFlow = summaryAndCategoryBaseFlow
     private val smartRuleFlow = repository.observeSmartCategoryRules(limit = 300)
+    private val recentConfirmedTransactionsFlow = repository.observeRecentTransactions(limit = 5000)
 
     private val selectedMonthSummaryFlow = selectedMonthFlow.flatMapLatest { ym ->
         val range = DateRangeUtils.monthRange(ym)
@@ -180,11 +190,25 @@ class CoinNestViewModel(
         )
     }
 
+    private val retentionFeedbackFlow = combine(
+        recentConfirmedTransactionsFlow,
+        selectedMonthDataFlow
+    ) { recentTxs, selectedMonthData ->
+        buildRetentionFeedback(
+            recentTransactions = recentTxs,
+            selectedMonthTransactions = selectedMonthData.transactions
+        )
+    }
+
     val uiState: StateFlow<HomeUiState> = combine(
         baseUiStateFlow,
-        smartRuleFlow
-    ) { base, smartRules ->
-        base.copy(smartLearningStatus = buildSmartLearningStatus(smartRules))
+        smartRuleFlow,
+        retentionFeedbackFlow
+    ) { base, smartRules, retentionFeedback ->
+        base.copy(
+            smartLearningStatus = buildSmartLearningStatus(smartRules),
+            retentionFeedback = retentionFeedback
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
     init {
@@ -326,6 +350,69 @@ class CoinNestViewModel(
             totalRules = rules.size,
             highConfidenceRules = rules.count { it.hitCount >= 3 },
             topKeywords = topKeywords
+        )
+    }
+
+    private fun buildRetentionFeedback(
+        recentTransactions: List<TransactionEntity>,
+        selectedMonthTransactions: List<TransactionEntity>
+    ): RetentionFeedbackState {
+        val allDates = recentTransactions
+            .map { Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).toLocalDate() }
+            .distinct()
+            .sorted()
+        if (allDates.isEmpty()) {
+            return RetentionFeedbackState()
+        }
+
+        val today = LocalDate.now(zone)
+        val dateSet = allDates.toSet()
+        var currentStreak = 0
+        var cursor = today
+        while (dateSet.contains(cursor)) {
+            currentStreak++
+            cursor = cursor.minusDays(1)
+        }
+
+        var longestStreak = 0
+        var streak = 0
+        var previousDate: LocalDate? = null
+        allDates.forEach { date ->
+            if (previousDate == null || date == previousDate!!.plusDays(1)) {
+                streak += 1
+            } else {
+                streak = 1
+            }
+            if (streak > longestStreak) longestStreak = streak
+            previousDate = date
+        }
+
+        val activeDaysInSelectedMonth = selectedMonthTransactions
+            .map { Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).toLocalDate() }
+            .distinct()
+            .size
+
+        val badgeThresholds = listOf(
+            3 to "连续3天记录",
+            7 to "连续7天记录",
+            14 to "连续14天记录",
+            30 to "连续30天记录"
+        )
+        val unlockedBadges = badgeThresholds
+            .filter { (threshold, _) -> longestStreak >= threshold }
+            .map { (_, name) -> name }
+
+        val celebrationMessage = badgeThresholds
+            .firstOrNull { (threshold, _) -> currentStreak == threshold }
+            ?.second
+            ?.let { "达成成就：$it，保持节奏很棒。" }
+
+        return RetentionFeedbackState(
+            currentStreakDays = currentStreak,
+            longestStreakDays = longestStreak,
+            activeDaysInSelectedMonth = activeDaysInSelectedMonth,
+            unlockedBadges = unlockedBadges,
+            celebrationMessage = celebrationMessage
         )
     }
 

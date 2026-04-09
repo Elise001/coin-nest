@@ -339,6 +339,7 @@ private fun OverviewScreen(
             )
         }
         item { FocusInsightCard(lines = focusInsights) }
+        item { RetentionFeedbackCard(feedback = state.retentionFeedback) }
         if (anomalies.isNotEmpty()) {
             item {
                 AnomalyRadarCard(
@@ -1527,6 +1528,34 @@ private fun FocusInsightCard(lines: List<String>) {
         lines.forEach { line ->
             Text("• $line", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(2.dp))
+        }
+    }
+}
+
+@Composable
+private fun RetentionFeedbackCard(feedback: RetentionFeedbackState) {
+    GlassCard {
+        Text("成就与留存", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text("当前连续记录：${feedback.currentStreakDays} 天")
+        Text("历史最长连续：${feedback.longestStreakDays} 天")
+        Text("本月记录活跃天：${feedback.activeDaysInSelectedMonth} 天")
+        if (feedback.unlockedBadges.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "已解锁徽章：${feedback.unlockedBadges.joinToString("、")}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (!feedback.celebrationMessage.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                feedback.celebrationMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF2E7D32),
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
