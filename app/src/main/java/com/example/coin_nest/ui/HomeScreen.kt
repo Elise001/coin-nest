@@ -33,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -60,7 +61,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,6 +92,14 @@ fun HomeScreen(
     onAddCategory: (String, String) -> Unit,
     onSelectMonth: (YearMonth) -> Unit,
     onSetMonthBudget: (String) -> Unit,
+    onSetCategoryBudget: (String, String, String) -> Unit,
+    onExportBackup: (onResult: (String) -> Unit, onError: (String) -> Unit) -> Unit,
+    onImportBackup: (
+        json: String,
+        replaceExisting: Boolean,
+        onResult: (Int, Int) -> Unit,
+        onError: (String) -> Unit
+    ) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var selectedMainTab by rememberSaveable { mutableIntStateOf(initialMainTabIndex.coerceIn(0, MainTab.entries.size - 1)) }
@@ -126,7 +137,14 @@ fun HomeScreen(
             when (mainTabs[selectedMainTab]) {
                 MainTab.Overview -> OverviewScreen(state, onSelectMonth, onUpdateTransactionCategory, onDeleteTransaction)
                 MainTab.Record -> RecordTab(state, onAddTransaction, onConfirmPendingAuto, onIgnorePendingAuto)
-                MainTab.Settings -> SettingsTab(state, onAddCategory, onSetMonthBudget)
+                MainTab.Settings -> SettingsTab(
+                    state = state,
+                    onAddCategory = onAddCategory,
+                    onSetMonthBudget = onSetMonthBudget,
+                    onSetCategoryBudget = onSetCategoryBudget,
+                    onExportBackup = onExportBackup,
+                    onImportBackup = onImportBackup
+                )
             }
         }
     }
@@ -240,6 +258,47 @@ private fun OverviewScreen(
     val yearReport = remember(yearTransactions, state.previousYearSummary.expenseCents) {
         buildReportSnapshot("${selectedMonth.year}年报", yearTransactions, state.previousYearSummary.expenseCents)
     }
+    val focusInsights = remember(
+        state.selectedMonthSummary.expenseCents,
+        state.previousMonthSummary.expenseCents,
+        state.monthBudgetCents
+    ) {
+        buildList {
+            val currentExpense = state.selectedMonthSummary.expenseCents
+            val previousExpense = state.previousMonthSummary.expenseCents
+            if (previousExpense > 0L) {
+                val delta = currentExpense - previousExpense
+                val percent = (kotlin.math.abs(delta).toDouble() / previousExpense.toDouble() * 100.0).roundToInt()
+                if (delta > 0L) add("较上月支出上升 $percent%，建议优先查看高频分类。")
+                if (delta < 0L) add("较上月支出下降 $percent%，当前节奏值得保持。")
+            }
+            val budget = state.monthBudgetCents
+            if (budget != null && budget > 0) {
+                val ratio = currentExpense.toDouble() / budget.toDouble()
+                when {
+                    ratio >= 1.0 -> add("本月预算已超额，今天建议暂停非必要支出。")
+                    ratio >= 0.8 -> add("预算已使用 ${(ratio * 100).roundToInt()}%，请关注接下来一周消费。")
+                    else -> add("预算使用率 ${(ratio * 100).roundToInt()}%，仍在安全范围。")
+                }
+            } else {
+                add("尚未设置本月预算，建议先设定一个可执行上限。")
+            }
+            if (isEmpty()) add("本期暂无明显风险，保持自动记账即可。")
+        }.take(3)
+    }
+    val anomalies = remember(
+        monthTransactions,
+        state.previousMonthSummary.expenseCents,
+        state.monthBudgetCents,
+        state.selectedMonthCategoryBudgets
+    ) {
+        buildMonthlyAnomalies(
+            monthTx = monthTransactions,
+            previousMonthExpenseCents = state.previousMonthSummary.expenseCents,
+            monthBudgetCents = state.monthBudgetCents,
+            categoryBudgets = state.selectedMonthCategoryBudgets
+        )
+    }
 
     val monthByDate = remember(showMonthCalendar, monthTransactions) {
         if (!showMonthCalendar) emptyMap()
@@ -268,6 +327,10 @@ private fun OverviewScreen(
                     if (it != OverviewTabMode.Monthly) showMonthCalendar = false
                 }
             )
+        }
+        item { FocusInsightCard(lines = focusInsights) }
+        if (anomalies.isNotEmpty()) {
+            item { AnomalyRadarCard(anomalies = anomalies) }
         }
 
         when (mode) {
@@ -759,6 +822,19 @@ private fun RecordTab(
         if (isIncome) keys.filter { it == "收入" }.ifEmpty { keys } else keys.filter { it != "收入" }.ifEmpty { keys }
     }
     val childOptions = remember(parentCategory, grouped) { grouped[parentCategory].orEmpty().map { it.child }.distinct().sorted() }
+    val recentCategoryPairs = remember(state.monthTransactions, isIncome) {
+        val targetType = if (isIncome) "INCOME" else "EXPENSE"
+        state.monthTransactions.asSequence()
+            .filter { it.type == targetType }
+            .sortedByDescending { it.occurredAtEpochMs }
+            .map { it.parentCategory to it.childCategory }
+            .distinct()
+            .take(4)
+            .toList()
+    }
+    val quickAmounts = remember(isIncome) {
+        if (isIncome) listOf("500", "1000", "3000", "5000") else listOf("10", "20", "30", "50", "100")
+    }
     val canSubmit = remember(amount, parentCategory, childCategory) {
         val parsed = amount.toBigDecimalOrNull()
         parsed != null && parsed > BigDecimal.ZERO && parentCategory.isNotBlank() && childCategory.isNotBlank()
@@ -776,6 +852,27 @@ private fun RecordTab(
                     Text("待确认自动记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("通知错过也没关系，可在这里确认或取消。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                state.pendingAutoTransactions.forEach { tx ->
+                                    onIgnorePendingAuto(tx.id)
+                                    NotificationManagerCompat.from(context).cancel(tx.id.toInt())
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("全部取消") }
+                        Button(
+                            onClick = {
+                                state.pendingAutoTransactions.forEach { tx ->
+                                    onConfirmPendingAuto(tx.id)
+                                    NotificationManagerCompat.from(context).cancel(tx.id.toInt())
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("全部确认") }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     state.pendingAutoTransactions.take(5).forEach { tx ->
                         PendingTransactionRow(
@@ -849,6 +946,40 @@ private fun RecordTab(
                         }
                     }
                     Spacer(modifier = Modifier.height(6.dp))
+                }
+                Text("快捷金额", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(6.dp))
+                quickAmounts.chunked(3).forEach { rowItems ->
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowItems.forEach { quick ->
+                            OutlinedButton(
+                                onClick = { amount = quick; amountError = null },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("¥$quick") }
+                        }
+                        repeat(3 - rowItems.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+                if (recentCategoryPairs.isNotEmpty()) {
+                    Text("最近分类", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    recentCategoryPairs.chunked(2).forEach { rowItems ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            rowItems.forEach { pair ->
+                                OutlinedButton(
+                                    onClick = {
+                                        parentCategory = pair.first
+                                        childCategory = pair.second
+                                        categoryError = false
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("${pair.first}/${pair.second}", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            }
+                            if (rowItems.size == 1) Spacer(modifier = Modifier.weight(1f))
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedTextField(
@@ -969,22 +1100,62 @@ private fun RecordTab(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsTab(
     state: HomeUiState,
     onAddCategory: (String, String) -> Unit,
-    onSetMonthBudget: (String) -> Unit
+    onSetMonthBudget: (String) -> Unit,
+    onSetCategoryBudget: (String, String, String) -> Unit,
+    onExportBackup: (onResult: (String) -> Unit, onError: (String) -> Unit) -> Unit,
+    onImportBackup: (
+        json: String,
+        replaceExisting: Boolean,
+        onResult: (Int, Int) -> Unit,
+        onError: (String) -> Unit
+    ) -> Unit
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     var budget by rememberSaveable { mutableStateOf("") }
     var budgetError by rememberSaveable { mutableStateOf<String?>(null) }
     var newParent by rememberSaveable { mutableStateOf("") }
     var newChild by rememberSaveable { mutableStateOf("") }
+    var budgetParentExpanded by rememberSaveable { mutableStateOf(false) }
+    var budgetChildExpanded by rememberSaveable { mutableStateOf(false) }
+    var budgetParent by rememberSaveable { mutableStateOf("") }
+    var budgetChild by rememberSaveable { mutableStateOf("") }
+    var categoryBudgetAmount by rememberSaveable { mutableStateOf("") }
+    var backupJsonInput by rememberSaveable { mutableStateOf("") }
+    var replaceExisting by rememberSaveable { mutableStateOf(false) }
     var autoBookHealthRefreshTick by rememberSaveable { mutableIntStateOf(0) }
     val autoBookHealth = remember(autoBookHealthRefreshTick) { getAutoBookHealthStatus(context) }
     val canUpdateBudget = remember(budget) {
         val parsed = budget.toBigDecimalOrNull()
         parsed != null && parsed > BigDecimal.ZERO
+    }
+    val grouped = remember(state.categories) { state.categories.groupBy { it.parent } }
+    val budgetParentOptions = remember(grouped) { grouped.keys.sorted() }
+    val budgetChildOptions = remember(budgetParent, grouped) { grouped[budgetParent].orEmpty().map { it.child }.distinct().sorted() }
+    val canSetCategoryBudget = remember(budgetParent, budgetChild, categoryBudgetAmount) {
+        budgetParent.isNotBlank() && budgetChild.isNotBlank() &&
+            ((categoryBudgetAmount.toBigDecimalOrNull() ?: BigDecimal.ZERO) > BigDecimal.ZERO)
+    }
+    val categoryBudgetUsage = remember(state.monthTransactions, state.selectedMonthCategoryBudgets) {
+        val expenseMap = state.monthTransactions.asSequence()
+            .filter { it.type == "EXPENSE" }
+            .groupBy { it.parentCategory to it.childCategory }
+            .mapValues { (_, txs) -> txs.sumOf { it.amountCents } }
+        state.selectedMonthCategoryBudgets.map { budgetItem ->
+            val used = expenseMap[budgetItem.parentCategory to budgetItem.childCategory] ?: 0L
+            budgetItem to used
+        }.sortedByDescending { (_, used) -> used }
+    }
+    LaunchedEffect(budgetParentOptions) {
+        if (budgetParent !in budgetParentOptions) budgetParent = budgetParentOptions.firstOrNull().orEmpty()
+    }
+    LaunchedEffect(budgetChildOptions) {
+        if (budgetChild !in budgetChildOptions) budgetChild = budgetChildOptions.firstOrNull().orEmpty()
     }
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1117,6 +1288,90 @@ private fun SettingsTab(
         }
         item {
             GlassCard {
+                Text("分类预算", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(8.dp))
+                ExposedDropdownMenuBox(expanded = budgetParentExpanded, onExpandedChange = { budgetParentExpanded = !budgetParentExpanded }) {
+                    OutlinedTextField(
+                        value = budgetParent,
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(),
+                        label = { Text("一级分类") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = budgetParentExpanded) }
+                    )
+                    ExposedDropdownMenu(expanded = budgetParentExpanded, onDismissRequest = { budgetParentExpanded = false }) {
+                        budgetParentOptions.forEach { parent ->
+                            DropdownMenuItem(
+                                text = { Text(parent) },
+                                onClick = {
+                                    budgetParent = parent
+                                    budgetChild = grouped[parent].orEmpty().firstOrNull()?.child.orEmpty()
+                                    budgetParentExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                ExposedDropdownMenuBox(expanded = budgetChildExpanded, onExpandedChange = { budgetChildExpanded = !budgetChildExpanded }) {
+                    OutlinedTextField(
+                        value = budgetChild,
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(),
+                        label = { Text("二级分类") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = budgetChildExpanded) }
+                    )
+                    ExposedDropdownMenu(expanded = budgetChildExpanded, onDismissRequest = { budgetChildExpanded = false }) {
+                        budgetChildOptions.forEach { child ->
+                            DropdownMenuItem(
+                                text = { Text(child) },
+                                onClick = {
+                                    budgetChild = child
+                                    budgetChildExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = categoryBudgetAmount,
+                    onValueChange = { categoryBudgetAmount = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("该分类预算（元）") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        onSetCategoryBudget(budgetParent, budgetChild, categoryBudgetAmount)
+                        Toast.makeText(context, "分类预算已更新", Toast.LENGTH_SHORT).show()
+                        categoryBudgetAmount = ""
+                    },
+                    enabled = canSetCategoryBudget,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("保存分类预算") }
+                if (categoryBudgetUsage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("本月分类预算进度", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    categoryBudgetUsage.take(6).forEach { (item, used) ->
+                        val ratio = if (item.limitCents <= 0) 0f else (used.toFloat() / item.limitCents.toFloat()).coerceAtLeast(0f)
+                        Text("${item.parentCategory}/${item.childCategory}  ${MoneyFormat.fromCents(used)} / ${MoneyFormat.fromCents(item.limitCents)}")
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { ratio.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
+            }
+        }
+        item {
+            GlassCard {
                 Text("新增二级分类", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = newParent, onValueChange = { newParent = it }, modifier = Modifier.fillMaxWidth(), label = { Text("一级分类") }, singleLine = true)
@@ -1125,6 +1380,86 @@ private fun SettingsTab(
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(onClick = { onAddCategory(newParent, newChild); newParent = ""; newChild = "" }, modifier = Modifier.fillMaxWidth()) { Text("添加分类") }
             }
+        }
+        item {
+            GlassCard {
+                Text("数据安全中心（本地）", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("导出后会复制到剪贴板；导入时粘贴备份 JSON 即可。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = {
+                        onExportBackup(
+                            { json ->
+                                clipboardManager.setText(AnnotatedString(json))
+                                Toast.makeText(context, "备份 JSON 已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                            },
+                            { error -> Toast.makeText(context, "导出失败：$error", Toast.LENGTH_SHORT).show() }
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("导出并复制备份") }
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = backupJsonInput,
+                    onValueChange = { backupJsonInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("粘贴备份 JSON") },
+                    minLines = 4,
+                    maxLines = 8
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = replaceExisting, onCheckedChange = { replaceExisting = it })
+                    Text("导入前清空现有数据（谨慎）", style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        onImportBackup(
+                            backupJsonInput,
+                            replaceExisting,
+                            { txCount, catCount ->
+                                Toast.makeText(context, "导入完成：$txCount 笔记录，$catCount 个分类", Toast.LENGTH_SHORT).show()
+                                backupJsonInput = ""
+                            },
+                            { error -> Toast.makeText(context, "导入失败：$error", Toast.LENGTH_SHORT).show() }
+                        )
+                    },
+                    enabled = backupJsonInput.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("导入本地备份") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusInsightCard(lines: List<String>) {
+    GlassCard {
+        Text("本期结论", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+        lines.forEach { line ->
+            Text("• $line", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.height(2.dp))
+        }
+    }
+}
+
+@Composable
+private fun AnomalyRadarCard(anomalies: List<AnomalyInsight>) {
+    GlassCard {
+        Text("异常消费雷达", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+        anomalies.forEach { anomaly ->
+            val tagColor = when (anomaly.level) {
+                "HIGH" -> Color(0xFFB23A30)
+                "MEDIUM" -> Color(0xFFD8894A)
+                else -> Color(0xFF6F4D34)
+            }
+            Text(anomaly.title, fontWeight = FontWeight.Medium, color = tagColor)
+            Text(anomaly.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.height(6.dp))
         }
     }
 }

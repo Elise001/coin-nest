@@ -1,9 +1,11 @@
 package com.example.coin_nest.ui
 
+import com.example.coin_nest.data.db.CategoryBudgetEntity
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.util.MoneyFormat
 import java.time.Instant
 import java.time.LocalDate
+import kotlin.math.roundToInt
 
 internal fun buildWeekLineTrend(weekTx: List<TransactionEntity>, weekStart: LocalDate): List<TrendPoint> {
     val expenseByDay = weekTx.asSequence()
@@ -127,5 +129,93 @@ internal fun buildReportSnapshot(
         maxExpenseLabel = maxLabel,
         changeSummary = changeSummary
     )
+}
+
+internal data class AnomalyInsight(
+    val title: String,
+    val detail: String,
+    val level: String
+)
+
+internal fun buildMonthlyAnomalies(
+    monthTx: List<TransactionEntity>,
+    previousMonthExpenseCents: Long,
+    monthBudgetCents: Long?,
+    categoryBudgets: List<CategoryBudgetEntity>
+): List<AnomalyInsight> {
+    val expenseTx = monthTx.filter { it.type == "EXPENSE" }
+    if (expenseTx.isEmpty()) return emptyList()
+
+    val anomalies = mutableListOf<AnomalyInsight>()
+    val totalExpense = expenseTx.sumOf { it.amountCents }
+    val avgExpense = (totalExpense / expenseTx.size).coerceAtLeast(1L)
+
+    val maxTx = expenseTx.maxByOrNull { it.amountCents }
+    if (maxTx != null && maxTx.amountCents >= maxOf(200_00L, avgExpense * 4)) {
+        anomalies += AnomalyInsight(
+            title = "出现大额单笔支出",
+            detail = "${maxTx.parentCategory}/${maxTx.childCategory} 单笔 ${MoneyFormat.fromCents(maxTx.amountCents)}，显著高于本月均值。",
+            level = "HIGH"
+        )
+    }
+
+    if (previousMonthExpenseCents > 0L) {
+        val delta = totalExpense - previousMonthExpenseCents
+        val ratio = kotlin.math.abs(delta).toDouble() / previousMonthExpenseCents.toDouble()
+        if (delta > 0L && ratio >= 0.3) {
+            anomalies += AnomalyInsight(
+                title = "月支出较上月明显上涨",
+                detail = "本月较上月上涨 ${(ratio * 100).roundToInt()}%（+${MoneyFormat.fromCents(delta)}）。",
+                level = "MEDIUM"
+            )
+        }
+    }
+
+    val expenseByParent = expenseTx.groupBy { it.parentCategory }.mapValues { (_, list) -> list.sumOf { it.amountCents } }
+    val topParent = expenseByParent.maxByOrNull { it.value }
+    if (topParent != null && totalExpense > 0L) {
+        val ratio = topParent.value.toDouble() / totalExpense.toDouble()
+        if (ratio >= 0.45 && topParent.value >= 500_00L) {
+            anomalies += AnomalyInsight(
+                title = "支出集中在单一分类",
+                detail = "${topParent.key} 占比 ${(ratio * 100).roundToInt()}%，存在结构性风险。",
+                level = "MEDIUM"
+            )
+        }
+    }
+
+    if (monthBudgetCents != null && monthBudgetCents > 0) {
+        val ratio = totalExpense.toDouble() / monthBudgetCents.toDouble()
+        if (ratio >= 1.0) {
+            anomalies += AnomalyInsight(
+                title = "总预算已超额",
+                detail = "本月支出 ${MoneyFormat.fromCents(totalExpense)} / 预算 ${MoneyFormat.fromCents(monthBudgetCents)}。",
+                level = "HIGH"
+            )
+        } else if (ratio >= 0.8) {
+            anomalies += AnomalyInsight(
+                title = "总预算接近上限",
+                detail = "预算使用率 ${(ratio * 100).roundToInt()}%，建议控制接下来一周支出。",
+                level = "LOW"
+            )
+        }
+    }
+
+    if (categoryBudgets.isNotEmpty()) {
+        val categoryExpenseMap = expenseTx.groupBy { it.parentCategory to it.childCategory }
+            .mapValues { (_, list) -> list.sumOf { it.amountCents } }
+        categoryBudgets.forEach { budget ->
+            val used = categoryExpenseMap[budget.parentCategory to budget.childCategory] ?: 0L
+            if (budget.limitCents > 0L && used > budget.limitCents) {
+                anomalies += AnomalyInsight(
+                    title = "分类预算超额：${budget.parentCategory}/${budget.childCategory}",
+                    detail = "已用 ${MoneyFormat.fromCents(used)} / 预算 ${MoneyFormat.fromCents(budget.limitCents)}。",
+                    level = "HIGH"
+                )
+            }
+        }
+    }
+
+    return anomalies.take(5)
 }
 

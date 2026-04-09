@@ -2,6 +2,7 @@ package com.example.coin_nest.data
 
 import android.content.ContentValues
 import android.content.Context
+import com.example.coin_nest.data.db.CategoryBudgetEntity
 import com.example.coin_nest.data.db.CategoryEntity
 import com.example.coin_nest.data.db.CoinNestDbHelper
 import com.example.coin_nest.data.db.MonthlyBudgetEntity
@@ -200,7 +201,8 @@ class CoinNestRepository(context: Context) {
         val payload = BackupPayload(
             transactions = queryAllTransactions(),
             categories = queryCategories().map { CategoryItem(it.parent, it.child) },
-            budgets = queryAllBudgets()
+            budgets = queryAllBudgets(),
+            categoryBudgets = queryAllCategoryBudgets()
         )
         toJson(payload)
     }
@@ -216,6 +218,7 @@ class CoinNestRepository(context: Context) {
                 db.delete("transactions", null, null)
                 db.delete("categories", null, null)
                 db.delete("monthly_budget", null, null)
+                db.delete("category_budget", null, null)
             }
 
             parsed.categories.forEach { cat ->
@@ -251,6 +254,15 @@ class CoinNestRepository(context: Context) {
                 }
                 db.insertWithOnConflict("monthly_budget", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
             }
+            parsed.categoryBudgets.forEach { budget ->
+                val values = ContentValues().apply {
+                    put("month_key", budget.monthKey)
+                    put("parent_category", budget.parentCategory)
+                    put("child_category", budget.childCategory)
+                    put("limit_cents", budget.limitCents)
+                }
+                db.insertWithOnConflict("category_budget", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+            }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -279,6 +291,36 @@ class CoinNestRepository(context: Context) {
                 queryMonthBudget(monthKey)
             }
         }
+    }
+
+    fun observeCategoryBudgets(monthKey: String): Flow<List<CategoryBudgetEntity>> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryCategoryBudgets(monthKey)
+            }
+        }
+    }
+
+    suspend fun upsertCategoryBudget(
+        monthKey: String,
+        parentCategory: String,
+        childCategory: String,
+        limitCents: Long
+    ) = withContext(Dispatchers.IO) {
+        if (parentCategory.isBlank() || childCategory.isBlank() || limitCents <= 0L) return@withContext
+        val values = ContentValues().apply {
+            put("month_key", monthKey)
+            put("parent_category", parentCategory.trim())
+            put("child_category", childCategory.trim())
+            put("limit_cents", limitCents)
+        }
+        dbHelper.writableDatabase.insertWithOnConflict(
+            "category_budget",
+            null,
+            values,
+            android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE
+        )
+        notifyChanged()
     }
 
     suspend fun currentMonthBudgetUsage(
@@ -575,6 +617,32 @@ class CoinNestRepository(context: Context) {
         }
     }
 
+    private fun queryCategoryBudgets(monthKey: String): List<CategoryBudgetEntity> {
+        val cursor = dbHelper.readableDatabase.query(
+            "category_budget",
+            arrayOf("month_key", "parent_category", "child_category", "limit_cents"),
+            "month_key = ?",
+            arrayOf(monthKey),
+            null,
+            null,
+            "parent_category ASC, child_category ASC"
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        CategoryBudgetEntity(
+                            monthKey = c.getString(c.getColumnIndexOrThrow("month_key")),
+                            parentCategory = c.getString(c.getColumnIndexOrThrow("parent_category")),
+                            childCategory = c.getString(c.getColumnIndexOrThrow("child_category")),
+                            limitCents = c.getLong(c.getColumnIndexOrThrow("limit_cents"))
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     private fun queryAllBudgets(): List<MonthlyBudgetEntity> {
         val cursor = dbHelper.readableDatabase.query(
             "monthly_budget",
@@ -591,6 +659,32 @@ class CoinNestRepository(context: Context) {
                     add(
                         MonthlyBudgetEntity(
                             monthKey = c.getString(c.getColumnIndexOrThrow("month_key")),
+                            limitCents = c.getLong(c.getColumnIndexOrThrow("limit_cents"))
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun queryAllCategoryBudgets(): List<CategoryBudgetEntity> {
+        val cursor = dbHelper.readableDatabase.query(
+            "category_budget",
+            arrayOf("month_key", "parent_category", "child_category", "limit_cents"),
+            null,
+            null,
+            null,
+            null,
+            "month_key ASC, parent_category ASC, child_category ASC"
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        CategoryBudgetEntity(
+                            monthKey = c.getString(c.getColumnIndexOrThrow("month_key")),
+                            parentCategory = c.getString(c.getColumnIndexOrThrow("parent_category")),
+                            childCategory = c.getString(c.getColumnIndexOrThrow("child_category")),
                             limitCents = c.getLong(c.getColumnIndexOrThrow("limit_cents"))
                         )
                     )
@@ -650,6 +744,17 @@ class CoinNestRepository(context: Context) {
             budgetArray.put(obj)
         }
         root.put("budgets", budgetArray)
+
+        val categoryBudgetArray = JSONArray()
+        payload.categoryBudgets.forEach { budget ->
+            val obj = JSONObject()
+            obj.put("month_key", budget.monthKey)
+            obj.put("parent_category", budget.parentCategory)
+            obj.put("child_category", budget.childCategory)
+            obj.put("limit_cents", budget.limitCents)
+            categoryBudgetArray.put(obj)
+        }
+        root.put("category_budgets", categoryBudgetArray)
         return root.toString()
     }
 
@@ -692,7 +797,23 @@ class CoinNestRepository(context: Context) {
                 limitCents = obj.optLong("limit_cents", 0L)
             )
         }
-        return BackupPayload(transactions = txList, categories = categories, budgets = budgets)
+        val categoryBudgets = mutableListOf<CategoryBudgetEntity>()
+        val categoryBudgetArray = root.optJSONArray("category_budgets") ?: JSONArray()
+        for (i in 0 until categoryBudgetArray.length()) {
+            val obj = categoryBudgetArray.getJSONObject(i)
+            categoryBudgets += CategoryBudgetEntity(
+                monthKey = obj.optString("month_key", ""),
+                parentCategory = obj.optString("parent_category", ""),
+                childCategory = obj.optString("child_category", ""),
+                limitCents = obj.optLong("limit_cents", 0L)
+            )
+        }
+        return BackupPayload(
+            transactions = txList,
+            categories = categories,
+            budgets = budgets,
+            categoryBudgets = categoryBudgets
+        )
     }
 
     private fun buildTransactions(cursor: android.database.Cursor): List<TransactionEntity> {

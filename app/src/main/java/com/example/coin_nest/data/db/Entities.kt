@@ -29,3 +29,10 @@ data class MonthlyBudgetEntity(
     val monthKey: String,
     val limitCents: Long
 )
+
+data class CategoryBudgetEntity(
+    val monthKey: String,
+    val parentCategory: String,
+    val childCategory: String,
+    val limitCents: Long
+)

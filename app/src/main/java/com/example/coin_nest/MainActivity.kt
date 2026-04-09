@@ -57,6 +57,9 @@ class MainActivity : ComponentActivity() {
                         onAddCategory = viewModel::addCategory,
                         onSelectMonth = viewModel::selectMonth,
                         onSetMonthBudget = viewModel::setCurrentMonthBudget,
+                        onSetCategoryBudget = viewModel::setSelectedMonthCategoryBudget,
+                        onExportBackup = viewModel::exportBackupJson,
+                        onImportBackup = viewModel::importBackupJson,
                         modifier = Modifier.padding(paddingValues)
                     )
                 }

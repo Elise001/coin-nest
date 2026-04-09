@@ -4,9 +4,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 internal enum class MainTab(val title: String) {
-    Overview("概览"),
-    Record("记账"),
-    Settings("设置")
+    Overview("首页"),
+    Record("记一笔"),
+    Settings("我的")
 }
 
 internal enum class OverviewTabMode(val title: String) {

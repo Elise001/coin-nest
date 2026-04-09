@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.coin_nest.data.CoinNestRepository
+import com.example.coin_nest.data.db.CategoryBudgetEntity
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.data.model.BalanceSummary
 import com.example.coin_nest.data.model.CategoryItem
@@ -33,6 +34,7 @@ data class HomeUiState(
     val previousMonthSummary: BalanceSummary = BalanceSummary(),
     val monthBudgetCents: Long? = null,
     val categories: List<CategoryItem> = emptyList(),
+    val selectedMonthCategoryBudgets: List<CategoryBudgetEntity> = emptyList(),
     val todayTransactions: List<TransactionEntity> = emptyList(),
     val monthTransactions: List<TransactionEntity> = emptyList(),
     val yearTransactions: List<TransactionEntity> = emptyList(),
@@ -52,7 +54,8 @@ private data class SelectedMonthData(
     val month: YearMonth,
     val summary: BalanceSummary,
     val previousMonthSummary: BalanceSummary,
-    val transactions: List<TransactionEntity>
+    val transactions: List<TransactionEntity>,
+    val categoryBudgets: List<CategoryBudgetEntity>
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -117,17 +120,23 @@ class CoinNestViewModel(
         repository.observeSummary(range.first, range.last + 1)
     }
 
+    private val selectedMonthCategoryBudgetsFlow = selectedMonthFlow.flatMapLatest { ym ->
+        repository.observeCategoryBudgets(DateRangeUtils.monthKey(ym))
+    }
+
     private val selectedMonthDataFlow = combine(
         selectedMonthFlow,
         selectedMonthSummaryFlow,
         previousMonthSummaryFlow,
-        selectedMonthTransactionsFlow
-    ) { month, summary, previousSummary, transactions ->
+        selectedMonthTransactionsFlow,
+        selectedMonthCategoryBudgetsFlow
+    ) { month, summary, previousSummary, transactions, categoryBudgets ->
         SelectedMonthData(
             month = month,
             summary = summary,
             previousMonthSummary = previousSummary,
-            transactions = transactions
+            transactions = transactions,
+            categoryBudgets = categoryBudgets
         )
     }
 
@@ -148,6 +157,7 @@ class CoinNestViewModel(
             previousMonthSummary = selectedMonthData.previousMonthSummary,
             monthBudgetCents = summary.monthBudgetCents,
             categories = summary.categories,
+            selectedMonthCategoryBudgets = selectedMonthData.categoryBudgets,
             todayTransactions = todayTxs,
             monthTransactions = selectedMonthData.transactions,
             yearTransactions = yearTxs,
@@ -196,6 +206,20 @@ class CoinNestViewModel(
         if (amount <= 0.0) return
         viewModelScope.launch {
             repository.upsertMonthBudget(monthKey, (amount * 100).toLong())
+        }
+    }
+
+    fun setSelectedMonthCategoryBudget(parentCategory: String, childCategory: String, amountYuan: String) {
+        val amount = amountYuan.toDoubleOrNull() ?: return
+        if (amount <= 0.0) return
+        val targetMonthKey = DateRangeUtils.monthKey(selectedMonthFlow.value)
+        viewModelScope.launch {
+            repository.upsertCategoryBudget(
+                monthKey = targetMonthKey,
+                parentCategory = parentCategory,
+                childCategory = childCategory,
+                limitCents = (amount * 100).toLong()
+            )
         }
     }
 

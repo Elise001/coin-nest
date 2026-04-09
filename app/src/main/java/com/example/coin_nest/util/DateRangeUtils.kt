@@ -44,4 +44,6 @@ object DateRangeUtils {
         val date = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
         return date.format(monthFormatter)
     }
+
+    fun monthKey(month: YearMonth): String = month.format(monthFormatter)
 }
