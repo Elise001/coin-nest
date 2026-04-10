@@ -4,13 +4,13 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 internal enum class MainTab(val title: String) {
-    Overview("首页"),
+    Home("首页"),
     Record("记一笔"),
-    Settings("我的")
+    Insight("洞察"),
+    Profile("我的")
 }
 
 internal enum class OverviewTabMode(val title: String) {
-    Daily("日"),
     Weekly("周"),
     Monthly("月"),
     Yearly("年")
