@@ -52,7 +52,8 @@ data class SmartLearningKeyword(
 data class SmartLearningStatus(
     val totalRules: Int = 0,
     val highConfidenceRules: Int = 0,
-    val topKeywords: List<SmartLearningKeyword> = emptyList()
+    val topKeywords: List<SmartLearningKeyword> = emptyList(),
+    val recent7DayHits: List<Int> = List(7) { 0 }
 )
 
 data class RetentionFeedbackState(
@@ -148,6 +149,11 @@ class CoinNestViewModel(
     private val selectedMonthCategoryBudgetsFlow = selectedMonthFlow.flatMapLatest { ym ->
         repository.observeCategoryBudgets(DateRangeUtils.monthKey(ym))
     }
+    private val selectedYearTransactionsFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val start = LocalDate.of(ym.year, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = LocalDate.of(ym.year + 1, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        repository.observeTransactionsInRange(start, end, limit = 12000)
+    }
 
     private val selectedMonthDataFlow = combine(
         selectedMonthFlow,
@@ -168,7 +174,7 @@ class CoinNestViewModel(
     private val baseUiStateFlow = combine(
         summaryAndCategoryFlow,
         repository.observeTransactionsInRange(dayRange.first, dayRange.last + 1, limit = 200),
-        repository.observeTransactionsInRange(yearRange.first, yearRange.last + 1, limit = 12000),
+        selectedYearTransactionsFlow,
         selectedMonthDataFlow,
         repository.observePendingAutoTransactions(limit = 100)
     ) { summary, todayTxs, yearTxs, selectedMonthData, pendingTxs ->
@@ -333,6 +339,13 @@ class CoinNestViewModel(
         rules: List<com.example.coin_nest.data.db.SmartCategoryRuleEntity>
     ): SmartLearningStatus {
         if (rules.isEmpty()) return SmartLearningStatus()
+        val today = LocalDate.now(zone)
+        val recent7DayMap = rules
+            .groupBy { Instant.ofEpochMilli(it.updatedAtEpochMs).atZone(zone).toLocalDate() }
+            .mapValues { (_, groupedRules) -> groupedRules.sumOf { it.hitCount.coerceAtLeast(1) } }
+        val recent7DayHits = (6 downTo 0).map { diff ->
+            recent7DayMap[today.minusDays(diff.toLong())] ?: 0
+        }
         val topKeywords = rules
             .groupBy { it.keyword }
             .map { (keyword, groupedRules) ->
@@ -349,7 +362,8 @@ class CoinNestViewModel(
         return SmartLearningStatus(
             totalRules = rules.size,
             highConfidenceRules = rules.count { it.hitCount >= 3 },
-            topKeywords = topKeywords
+            topKeywords = topKeywords,
+            recent7DayHits = recent7DayHits
         )
     }
 
