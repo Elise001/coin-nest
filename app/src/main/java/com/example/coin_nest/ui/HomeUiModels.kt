@@ -23,10 +23,10 @@ internal data class DayAmountSummary(
     val balanceCents: Long get() = incomeCents - expenseCents
 }
 
-internal data class TrendPoint(val label: String, val expenseCents: Long)
-internal data class AxisMarker(val label: String, val value: Long)
+data class TrendPoint(val label: String, val expenseCents: Long)
+data class AxisMarker(val label: String, val value: Long)
 
-internal data class CategoryShare(
+data class CategoryShare(
     val name: String,
     val amountCents: Long,
     val ratio: Float

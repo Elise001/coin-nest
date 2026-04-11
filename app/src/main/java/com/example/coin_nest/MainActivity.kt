@@ -54,6 +54,8 @@ class MainActivity : ComponentActivity() {
                         onIgnorePendingAuto = viewModel::ignorePendingAutoTransaction,
                         onUpdateTransactionCategory = viewModel::updateTransactionCategory,
                         onDeleteTransaction = viewModel::deleteTransaction,
+                        onLoadMoreMonthTransactions = viewModel::loadMoreSelectedMonthTransactions,
+                        onLoadMoreYearTransactions = viewModel::loadMoreSelectedYearTransactions,
                         onAddCategory = viewModel::addCategory,
                         onSelectMonth = viewModel::selectMonth,
                         onSetMonthBudget = viewModel::setCurrentMonthBudget,

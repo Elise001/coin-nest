@@ -2,7 +2,6 @@
 
 import android.content.Intent
 import android.net.Uri
-import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -103,7 +102,7 @@ internal fun SettingsTab(
     var lastImportStatus by rememberSaveable { mutableStateOf<String?>(null) }
     val profileEntries = remember {
         listOf(
-            ProfileNavEntry("自动记账与权限", "通知监听、后台保活", "autobook"),
+            ProfileNavEntry("自动记账与权限", "必要权限与稳定性优化", "autobook"),
             ProfileNavEntry("预算与分类", "月预算、分类预算、新增分类", "budget"),
             ProfileNavEntry("数据与备份", "导出、导入与恢复", "data")
         )
@@ -173,13 +172,9 @@ internal fun SettingsTab(
     }
     val autoBookHealth = remember(autoBookHealthRefreshTick) { getAutoBookHealthStatus(context) }
     val healthPassRate = remember(autoBookHealth) {
-        val checks = listOf(
-            autoBookHealth.hints.any { it.contains("通知监听权限：已开启") },
-            autoBookHealth.hints.any { it.contains("Coin Nest 通知权限：已开启") },
-            autoBookHealth.hints.any { it.contains("微信 支付通知：已开启") || it.contains("微信 支付通知：已开启或系统限制无法检测") },
-            autoBookHealth.hints.any { it.contains("支付宝 支付通知：已开启") || it.contains("支付宝 支付通知：已开启或系统限制无法检测") }
-        )
-        checks.count { it }.toFloat() / checks.size.toFloat()
+        val required = autoBookHealth.requiredChecks
+        if (required.isEmpty()) 0f
+        else required.count { it.state == AutoBookCheckState.PASS }.toFloat() / required.size.toFloat()
     }
     val canUpdateBudget = remember(budget) {
         val parsed = budget.toBigDecimalOrNull()
@@ -280,23 +275,69 @@ internal fun SettingsTab(
                     GlassCard {
                         Text("自动记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("通过监听支付消息通知自动提取交易金额。请先做一次状态体检。")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("健康体检进度 ${(healthPassRate * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "必要权限完成度 ${(healthPassRate * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Spacer(modifier = Modifier.height(4.dp))
                         LinearProgressIndicator(progress = { healthPassRate.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(8.dp)))
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(if (autoBookHealth.healthy) "自动记账状态：可用" else "自动记账状态：待修复", color = if (autoBookHealth.healthy) SuccessColor else DangerColor, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (autoBookHealth.healthy) "自动记账状态：可用" else "自动记账状态：待修复",
+                            color = if (autoBookHealth.healthy) SuccessColor else DangerColor,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         Spacer(modifier = Modifier.height(6.dp))
-                        autoBookHealth.hints.forEach { hint -> Text("• $hint", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        autoBookHealth.diagnostics.take(2).forEach { hint ->
+                            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         Spacer(modifier = Modifier.height(10.dp))
+                        Text("必要权限", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(8.dp))
                         PrimaryActionButton(text = "打开通知监听权限", onClick = { when (checkAndOpenNotificationListenerPermission(context)) { ListenerPermissionActionResult.ALREADY_ENABLED -> Toast.makeText(context, "通知监听权限已开启", Toast.LENGTH_SHORT).show(); ListenerPermissionActionResult.OPENED_SETTINGS -> Toast.makeText(context, "请开启 Coin Nest 通知监听权限", Toast.LENGTH_SHORT).show() }; autoBookHealthRefreshTick++ }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), containerColor = WarningColor)
                         Spacer(modifier = Modifier.height(8.dp))
                         PrimaryActionButton(text = "打开微信支付通知", onClick = { when (checkAndOpenPaymentNotificationSettings(context, WECHAT_PACKAGE_NAME)) { PaymentNotifyActionResult.ALREADY_ENABLED -> Toast.makeText(context, "微信通知已开启", Toast.LENGTH_SHORT).show(); PaymentNotifyActionResult.OPENED_SETTINGS -> Toast.makeText(context, "请在微信通知设置页确认已开启支付通知", Toast.LENGTH_SHORT).show(); PaymentNotifyActionResult.APP_NOT_INSTALLED -> Toast.makeText(context, "未检测到微信", Toast.LENGTH_SHORT).show() }; autoBookHealthRefreshTick++ }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), containerColor = WarningColor)
                         Spacer(modifier = Modifier.height(8.dp))
                         PrimaryActionButton(text = "打开支付宝支付通知", onClick = { when (checkAndOpenPaymentNotificationSettings(context, ALIPAY_PACKAGE_NAME)) { PaymentNotifyActionResult.ALREADY_ENABLED -> Toast.makeText(context, "支付宝通知已开启", Toast.LENGTH_SHORT).show(); PaymentNotifyActionResult.OPENED_SETTINGS -> Toast.makeText(context, "请在支付宝通知设置页确认已开启支付通知", Toast.LENGTH_SHORT).show(); PaymentNotifyActionResult.APP_NOT_INSTALLED -> Toast.makeText(context, "未检测到支付宝", Toast.LENGTH_SHORT).show() }; autoBookHealthRefreshTick++ }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), containerColor = WarningColor)
                         Spacer(modifier = Modifier.height(8.dp))
-                        PrimaryActionButton(text = "允许后台保活（可选）", onClick = { try { val pm = context.getSystemService(PowerManager::class.java); if (pm != null && !pm.isIgnoringBatteryOptimizations(context.packageName)) { val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${context.packageName}") }; context.startActivity(intent); Toast.makeText(context, "请允许忽略电池优化", Toast.LENGTH_SHORT).show() } else { Toast.makeText(context, "后台保活已开启", Toast.LENGTH_SHORT).show() } } catch (_: Exception) { Toast.makeText(context, "打开失败", Toast.LENGTH_SHORT).show() }; autoBookHealthRefreshTick++ }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), containerColor = WarningColor)
+                        Text("优化项", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        PrimaryActionButton(
+                            text = "后台保活（提升稳定）",
+                            onClick = {
+                                try {
+                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    context.startActivity(intent)
+                                    Toast.makeText(context, "请允许忽略电池优化", Toast.LENGTH_SHORT).show()
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "打开失败", Toast.LENGTH_SHORT).show()
+                                }
+                                autoBookHealthRefreshTick++
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            containerColor = WarningColor
+                        )
+                        if (autoBookHealth.isXiaomiFamily) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            PrimaryActionButton(
+                                text = "自启动（小米/红米建议）",
+                                onClick = {
+                                    val opened = openAutoStartSettings(context)
+                                    Toast.makeText(
+                                        context,
+                                        if (opened) "请在系统页允许 Coin Nest 自启动" else "打开失败，请手动到系统设置开启自启动",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                containerColor = WarningColor
+                            )
+                        }
                     }
                 }
             }
@@ -631,6 +672,27 @@ private data class ProfileNavEntry(
     val subtitle: String,
     val route: String
 )
+
+@Composable
+private fun PermissionCheckRow(item: AutoBookCheckItem) {
+    val (badge, color) = when (item.state) {
+        AutoBookCheckState.PASS -> "已通过" to SuccessColor
+        AutoBookCheckState.FAIL -> "未通过" to DangerColor
+        AutoBookCheckState.UNKNOWN -> "待确认" to WarningColor
+    }
+    Text(
+        text = "• ${item.title}：$badge",
+        style = MaterialTheme.typography.bodySmall,
+        color = color
+    )
+    if (item.state != AutoBookCheckState.PASS && item.detail.isNotBlank()) {
+        Text(
+            text = "  ${item.detail}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
 
 @Composable
 private fun ProfileEntryCard(

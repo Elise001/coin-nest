@@ -102,6 +102,8 @@ fun HomeScreen(
     onIgnorePendingAuto: (Long) -> Unit,
     onUpdateTransactionCategory: (Long, String, String) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
+    onLoadMoreMonthTransactions: () -> Unit,
+    onLoadMoreYearTransactions: () -> Unit,
     onAddCategory: (String, String) -> Unit,
     onSelectMonth: (YearMonth) -> Unit,
     onSetMonthBudget: (String) -> Unit,
@@ -153,7 +155,9 @@ fun HomeScreen(
                     state = state,
                     onSelectMonth = onSelectMonth,
                     onUpdateTransactionCategory = onUpdateTransactionCategory,
-                    onDeleteTransaction = onDeleteTransaction
+                    onDeleteTransaction = onDeleteTransaction,
+                    onLoadMoreMonthTransactions = onLoadMoreMonthTransactions,
+                    onLoadMoreYearTransactions = onLoadMoreYearTransactions
                 )
                 MainTab.Profile -> SettingsTab(
                     state = state,

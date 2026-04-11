@@ -2,14 +2,18 @@
 
 import android.Manifest
 import android.app.AppOpsManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.example.coin_nest.autobook.AutoBookTelemetry
+import com.example.coin_nest.autobook.PaymentNotificationListener
 import com.example.coin_nest.data.db.TransactionEntity
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -33,7 +37,22 @@ private val autoSources = setOf(
 
 internal data class AutoBookHealthStatus(
     val healthy: Boolean,
-    val hints: List<String>
+    val requiredChecks: List<AutoBookCheckItem>,
+    val optionalChecks: List<AutoBookCheckItem>,
+    val diagnostics: List<String>,
+    val isXiaomiFamily: Boolean
+)
+
+internal enum class AutoBookCheckState {
+    PASS,
+    FAIL,
+    UNKNOWN
+}
+
+internal data class AutoBookCheckItem(
+    val title: String,
+    val detail: String,
+    val state: AutoBookCheckState
 )
 
 internal fun shouldAllowCategoryEdit(tx: TransactionEntity): Boolean {
@@ -67,7 +86,7 @@ internal fun formatSourceLabel(source: String): String {
 }
 
 internal fun formatEpoch(epochMs: Long): String {
-    return Instant.ofEpochMilli(epochMs).atZone(zone).format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+    return Instant.ofEpochMilli(epochMs).atZone(zone).format(DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
 }
 
 internal const val WECHAT_PACKAGE_NAME = "com.tencent.mm"
@@ -85,8 +104,10 @@ internal enum class ListenerPermissionActionResult {
 }
 
 internal fun getAutoBookHealthStatus(context: Context): AutoBookHealthStatus {
-    val hints = mutableListOf<String>()
-    var healthy = true
+    val requiredChecks = mutableListOf<AutoBookCheckItem>()
+    val optionalChecks = mutableListOf<AutoBookCheckItem>()
+    val diagnostics = mutableListOf<String>()
+    val isXiaomi = isXiaomiFamilyDevice()
 
     val listenerEnabled = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
     val selfNotificationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -95,40 +116,133 @@ internal fun getAutoBookHealthStatus(context: Context): AutoBookHealthStatus {
         true
     }
 
-    if (listenerEnabled) {
-        hints += "通知监听权限：已开启"
+    requiredChecks += if (listenerEnabled) {
+        AutoBookCheckItem(
+            title = "通知监听权限（必要）",
+            detail = "已开启",
+            state = AutoBookCheckState.PASS
+        )
     } else {
-        healthy = false
-        hints += "通知监听权限：未开启（重装后常被系统重置，请重新开启）"
+        AutoBookCheckItem(
+            title = "通知监听权限（必要）",
+            detail = "未开启",
+            state = AutoBookCheckState.FAIL
+        )
     }
 
-    if (selfNotificationEnabled) {
-        hints += "Coin Nest 通知权限：已开启"
+    optionalChecks += if (selfNotificationEnabled) {
+        AutoBookCheckItem(
+            title = "Coin Nest 通知权限（非必要）",
+            detail = "已开启",
+            state = AutoBookCheckState.PASS
+        )
     } else {
-        healthy = false
-        hints += "Coin Nest 通知权限：未开启（将无法弹出待确认通知）"
+        AutoBookCheckItem(
+            title = "Coin Nest 通知权限（非必要）",
+            detail = "未开启",
+            state = AutoBookCheckState.FAIL
+        )
     }
 
-    hints += paymentAppHint(context, WECHAT_PACKAGE_NAME, "微信")
-    hints += paymentAppHint(context, ALIPAY_PACKAGE_NAME, "支付宝")
+    val lastConnectedMs = AutoBookTelemetry.readLastListenerConnectedMs(context)
+    if (lastConnectedMs > 0L) {
+        diagnostics += "最近连接：${formatEpoch(lastConnectedMs)}"
+    } else {
+        diagnostics += "最近连接：暂无"
+    }
 
-    return AutoBookHealthStatus(healthy = healthy, hints = hints)
+    val lastNotifyMs = AutoBookTelemetry.readLastNotifyReceivedMs(context)
+    val lastNotifyPkg = AutoBookTelemetry.readLastNotifyPackage(context)
+    val lastNotifyPreview = AutoBookTelemetry.readLastNotifyPreview(context)
+    if (lastNotifyMs > 0L) {
+        val pkgLabel = mapPaymentPackageLabel(lastNotifyPkg)
+        val previewSuffix = lastNotifyPreview?.takeIf { it.isNotBlank() }?.let { " · ${it.take(20)}" }.orEmpty()
+        diagnostics += "最近监听：$pkgLabel ${formatEpoch(lastNotifyMs)}$previewSuffix"
+    } else {
+        diagnostics += "最近监听：暂无"
+    }
+
+    AutoBookTelemetry.readLastReason(context)?.let { reason ->
+        diagnostics += "最近异常：${toChineseReason(reason)}"
+    }
+
+    val wechatCheck = paymentAppCheck(context, WECHAT_PACKAGE_NAME, "微信支付通知（必要）")
+    val alipayCheck = paymentAppCheck(context, ALIPAY_PACKAGE_NAME, "支付宝支付通知（必要）")
+    requiredChecks += wechatCheck
+    requiredChecks += alipayCheck
+
+    val batteryIgnored = isIgnoringBatteryOptimizations(context)
+    optionalChecks += when (batteryIgnored) {
+        true -> AutoBookCheckItem(
+            title = "后台保活（非必要）",
+            detail = "已开启",
+            state = AutoBookCheckState.PASS
+        )
+        false -> AutoBookCheckItem(
+            title = "后台保活（非必要）",
+            detail = "未开启",
+            state = AutoBookCheckState.FAIL
+        )
+        null -> AutoBookCheckItem(
+            title = "后台保活（非必要）",
+            detail = "待确认",
+            state = AutoBookCheckState.UNKNOWN
+        )
+    }
+
+    if (isXiaomi) {
+        optionalChecks += AutoBookCheckItem(
+            title = "自启动（小米/红米强烈建议）",
+            detail = "建议开启",
+            state = AutoBookCheckState.UNKNOWN
+        )
+        diagnostics += "小米/红米：优先开启自启动"
+    }
+
+    val healthy = requiredChecks.all { it.state == AutoBookCheckState.PASS }
+
+    return AutoBookHealthStatus(
+        healthy = healthy,
+        requiredChecks = requiredChecks,
+        optionalChecks = optionalChecks,
+        diagnostics = diagnostics,
+        isXiaomiFamily = isXiaomi
+    )
 }
 
-private fun paymentAppHint(context: Context, packageName: String, label: String): String {
+private fun paymentAppCheck(context: Context, packageName: String, label: String): AutoBookCheckItem {
     val appInfo = runCatching { context.packageManager.getApplicationInfo(packageName, 0) }.getOrNull()
-        ?: return "$label：未安装"
+        ?: return AutoBookCheckItem(
+            title = label,
+            detail = "未安装",
+            state = AutoBookCheckState.UNKNOWN
+        )
     val enabled = isAppNotificationEnabled(context, packageName, appInfo.uid)
-    return if (enabled == false) {
-        "$label 支付通知：未开启"
-    } else {
-        "$label 支付通知：已开启或系统限制无法检测"
+    return when (enabled) {
+        false -> AutoBookCheckItem(
+            title = label,
+            detail = "未开启",
+            state = AutoBookCheckState.FAIL
+        )
+        true -> AutoBookCheckItem(
+            title = label,
+            detail = "已开启",
+            state = AutoBookCheckState.PASS
+        )
+        null -> AutoBookCheckItem(
+            title = label,
+            detail = "待确认",
+            state = AutoBookCheckState.UNKNOWN
+        )
     }
 }
 
 internal fun checkAndOpenNotificationListenerPermission(context: Context): ListenerPermissionActionResult {
     val isEnabled = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
-    if (isEnabled) return ListenerPermissionActionResult.ALREADY_ENABLED
+    if (isEnabled) {
+        forceRebindNotificationListener(context)
+        return ListenerPermissionActionResult.ALREADY_ENABLED
+    }
     context.startActivity(
         Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -176,4 +290,90 @@ private fun isAppNotificationEnabled(context: Context, packageName: String, uid:
         val mode = appOps.checkOpNoThrow(opPostNotification, uid, packageName)
         mode == AppOpsManager.MODE_ALLOWED || mode == AppOpsManager.MODE_DEFAULT
     }.getOrNull()
+}
+
+private fun forceRebindNotificationListener(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+    runCatching {
+        val component = ComponentName(context, PaymentNotificationListener::class.java)
+        android.service.notification.NotificationListenerService.requestRebind(component)
+    }
+}
+
+internal fun openAutoStartSettings(context: Context): Boolean {
+    val intents = listOf(
+        Intent().apply {
+            component = ComponentName(
+                "com.miui.securitycenter",
+                "com.miui.permcenter.autostart.AutoStartManagementActivity"
+            )
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        },
+        Intent().apply {
+            component = ComponentName(
+                "com.miui.securitycenter",
+                "com.miui.appmanager.ApplicationsDetailsActivity"
+            )
+            putExtra("package_name", context.packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    )
+    intents.forEach { intent ->
+        val opened = runCatching {
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
+        if (opened) return true
+    }
+    return runCatching {
+        context.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
+        true
+    }.getOrDefault(false)
+}
+
+private fun isIgnoringBatteryOptimizations(context: Context): Boolean? {
+    val powerManager = context.getSystemService(PowerManager::class.java) ?: return null
+    return runCatching { powerManager.isIgnoringBatteryOptimizations(context.packageName) }.getOrNull()
+}
+
+private fun isXiaomiFamilyDevice(): Boolean {
+    val brand = Build.BRAND.orEmpty().lowercase()
+    val manufacturer = Build.MANUFACTURER.orEmpty().lowercase()
+    return brand.contains("xiaomi") ||
+        brand.contains("redmi") ||
+        brand.contains("poco") ||
+        manufacturer.contains("xiaomi")
+}
+
+private fun toChineseReason(raw: String): String {
+    val reason = raw.uppercase()
+    return when {
+        reason.contains("SAME_SOURCE_DUPLICATE_BY_TXN_REF") -> "同源重复（同交易号）"
+        reason.contains("DUPLICATE_OR_CONFLICT") -> "重复或数据库冲突"
+        reason.contains("CROSS_SOURCE_LINKED") -> "跨渠道关联（已合并）"
+        reason.contains("INSERTED") -> "已入库"
+        reason.contains("PARSE") -> "通知解析失败"
+        reason.contains("LISTENER") -> "监听服务异常"
+        else -> raw.take(36)
+    }
+}
+
+private fun mapPaymentPackageLabel(pkg: String?): String {
+    return when (pkg) {
+        "com.eg.android.AlipayGphone" -> "支付宝"
+        "com.tencent.mm" -> "微信"
+        "com.taobao.taobao" -> "淘宝"
+        "com.jingdong.app.mall" -> "京东"
+        "com.xunmeng.pinduoduo" -> "拼多多"
+        "com.sankuai.meituan" -> "美团"
+        "com.unionpay" -> "云闪付"
+        "cmb.pb", "com.chinamworld.main", "com.icbc" -> "银行卡"
+        null, "" -> "未知来源"
+        else -> pkg
+    }
 }

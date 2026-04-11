@@ -31,6 +31,16 @@ data class AutoTransactionInsertResult(
     val shouldNotify: Boolean
 )
 
+data class ExpenseBucketRow(
+    val bucket: Int,
+    val amountCents: Long
+)
+
+data class CategoryExpenseRow(
+    val category: String,
+    val amountCents: Long
+)
+
 private data class SmartCategorySuggestion(
     val parentCategory: String,
     val childCategory: String,
@@ -74,6 +84,50 @@ class CoinNestRepository(context: Context) {
         return changeTick.map {
             withContext(Dispatchers.IO) {
                 querySummary(startInclusive = startInclusive, endExclusive = endExclusive)
+            }
+        }
+    }
+
+    fun observeConfirmedTransactionCountInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<Int> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryConfirmedTransactionCountInRange(startInclusive, endExclusive)
+            }
+        }
+    }
+
+    fun observeExpenseByDayInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<List<ExpenseBucketRow>> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryExpenseByDayInRange(startInclusive, endExclusive)
+            }
+        }
+    }
+
+    fun observeExpenseByMonthInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<List<ExpenseBucketRow>> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryExpenseByMonthInRange(startInclusive, endExclusive)
+            }
+        }
+    }
+
+    fun observeCategoryExpenseInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<List<CategoryExpenseRow>> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryCategoryExpenseInRange(startInclusive, endExclusive)
             }
         }
     }
@@ -836,6 +890,121 @@ class CoinNestRepository(context: Context) {
             limit.toString()
         )
         return cursor.use { c -> buildTransactions(c) }
+    }
+
+    private fun queryConfirmedTransactionCountInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Int {
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT COUNT(1) AS cnt
+            FROM transactions
+            WHERE occurred_at_epoch_ms >= ?
+              AND occurred_at_epoch_ms < ?
+              AND status = ?
+            """.trimIndent(),
+            arrayOf(startInclusive.toString(), endExclusive.toString(), STATUS_CONFIRMED)
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) c.getInt(c.getColumnIndexOrThrow("cnt")) else 0
+        }
+    }
+
+    private fun queryExpenseByDayInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): List<ExpenseBucketRow> {
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT CAST(strftime('%d', occurred_at_epoch_ms / 1000, 'unixepoch', 'localtime') AS INTEGER) AS day_bucket,
+                   SUM(amount_cents) AS expense_sum
+            FROM transactions
+            WHERE occurred_at_epoch_ms >= ?
+              AND occurred_at_epoch_ms < ?
+              AND status = ?
+              AND type = 'EXPENSE'
+            GROUP BY day_bucket
+            ORDER BY day_bucket ASC
+            """.trimIndent(),
+            arrayOf(startInclusive.toString(), endExclusive.toString(), STATUS_CONFIRMED)
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        ExpenseBucketRow(
+                            bucket = c.getInt(c.getColumnIndexOrThrow("day_bucket")),
+                            amountCents = c.getLong(c.getColumnIndexOrThrow("expense_sum"))
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun queryExpenseByMonthInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): List<ExpenseBucketRow> {
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT CAST(strftime('%m', occurred_at_epoch_ms / 1000, 'unixepoch', 'localtime') AS INTEGER) AS month_bucket,
+                   SUM(amount_cents) AS expense_sum
+            FROM transactions
+            WHERE occurred_at_epoch_ms >= ?
+              AND occurred_at_epoch_ms < ?
+              AND status = ?
+              AND type = 'EXPENSE'
+            GROUP BY month_bucket
+            ORDER BY month_bucket ASC
+            """.trimIndent(),
+            arrayOf(startInclusive.toString(), endExclusive.toString(), STATUS_CONFIRMED)
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        ExpenseBucketRow(
+                            bucket = c.getInt(c.getColumnIndexOrThrow("month_bucket")),
+                            amountCents = c.getLong(c.getColumnIndexOrThrow("expense_sum"))
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun queryCategoryExpenseInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): List<CategoryExpenseRow> {
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT parent_category,
+                   SUM(amount_cents) AS expense_sum
+            FROM transactions
+            WHERE occurred_at_epoch_ms >= ?
+              AND occurred_at_epoch_ms < ?
+              AND status = ?
+              AND type = 'EXPENSE'
+            GROUP BY parent_category
+            ORDER BY expense_sum DESC
+            """.trimIndent(),
+            arrayOf(startInclusive.toString(), endExclusive.toString(), STATUS_CONFIRMED)
+        )
+        return cursor.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        CategoryExpenseRow(
+                            category = c.getString(c.getColumnIndexOrThrow("parent_category")),
+                            amountCents = c.getLong(c.getColumnIndexOrThrow("expense_sum"))
+                        )
+                    )
+                }
+            }
+        }
     }
 
     private fun queryCategories(): List<CategoryEntity> {

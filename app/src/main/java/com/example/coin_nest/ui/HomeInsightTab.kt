@@ -53,7 +53,9 @@ internal fun InsightTab(
     state: HomeUiState,
     onSelectMonth: (YearMonth) -> Unit,
     onUpdateTransactionCategory: (Long, String, String) -> Unit,
-    onDeleteTransaction: (Long) -> Unit
+    onDeleteTransaction: (Long) -> Unit,
+    onLoadMoreMonthTransactions: () -> Unit,
+    onLoadMoreYearTransactions: () -> Unit
 ) {
     onUpdateTransactionCategory
     val nav = rememberNavController()
@@ -199,6 +201,14 @@ internal fun InsightTab(
                 }
                 if (selectedWeekDayTx.isEmpty()) {
                     item { GlassCard { Text("${selectedWeekDate.monthValue}/${selectedWeekDate.dayOfMonth} 暂无流水") } }
+                    if (state.yearHasMore) {
+                        item {
+                            OutlinedButton(
+                                onClick = onLoadMoreYearTransactions,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("加载更多历史流水") }
+                        }
+                    }
                 } else {
                     items(selectedWeekDayTx, key = { it.id }) { tx ->
                         InsightTransactionRow(tx = tx, onDelete = { deleteTx = tx })
@@ -208,8 +218,8 @@ internal fun InsightTab(
         }
 
         composable("month_detail") {
-            val monthTrend = remember(monthTx, selectedMonth) { buildMonthLineTrend(monthTx, selectedMonth) }
-            val monthShare = remember(monthTx) { buildCategoryShare(monthTx) }
+            val monthTrend = state.monthTrendPoints
+            val monthShare = state.monthCategoryShare
             val monthSummaryByDay = remember(monthByDate) { calculateDaySummary(monthByDate) }
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -236,18 +246,34 @@ internal fun InsightTab(
                 }
                 if (selectedMonthDayTx.isEmpty()) {
                     item { GlassCard { Text("${selectedMonthDate.monthValue}/${selectedMonthDate.dayOfMonth} 暂无流水") } }
+                    if (state.monthHasMore) {
+                        item {
+                            OutlinedButton(
+                                onClick = onLoadMoreMonthTransactions,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("加载更多本月流水") }
+                        }
+                    }
                 } else {
                     items(selectedMonthDayTx, key = { it.id }) { tx ->
                         InsightTransactionRow(tx = tx, onDelete = { deleteTx = tx })
+                    }
+                    if (state.monthHasMore) {
+                        item {
+                            OutlinedButton(
+                                onClick = onLoadMoreMonthTransactions,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("加载更多本月流水") }
+                        }
                     }
                 }
             }
         }
 
         composable("year_detail") {
-            val yearTrend = remember(yearTx) { buildYearLineTrend(yearTx) }
-            val yearShare = remember(yearTx) { buildCategoryShare(yearTx) }
-            val yearSummary = remember(yearTx) { calculateSummary(yearTx) }
+            val yearTrend = state.yearTrendPoints
+            val yearShare = state.yearCategoryShare
+            val yearSummary = state.selectedYearSummary
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -270,6 +296,14 @@ internal fun InsightTab(
                 }
                 item { InsightBarTrendCard(title = "年内月度支出柱状图", points = yearTrend) }
                 item { InsightPieCard(title = "年度分类饼图", shares = yearShare) }
+                if (state.yearHasMore) {
+                    item {
+                        OutlinedButton(
+                            onClick = onLoadMoreYearTransactions,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("加载更多历史流水（用于周视图）") }
+                    }
+                }
             }
         }
 

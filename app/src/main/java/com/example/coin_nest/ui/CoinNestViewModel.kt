@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -38,6 +39,13 @@ data class HomeUiState(
     val todayTransactions: List<TransactionEntity> = emptyList(),
     val monthTransactions: List<TransactionEntity> = emptyList(),
     val yearTransactions: List<TransactionEntity> = emptyList(),
+    val monthTrendPoints: List<TrendPoint> = emptyList(),
+    val yearTrendPoints: List<TrendPoint> = emptyList(),
+    val monthCategoryShare: List<CategoryShare> = emptyList(),
+    val yearCategoryShare: List<CategoryShare> = emptyList(),
+    val selectedYearSummary: BalanceSummary = BalanceSummary(),
+    val monthHasMore: Boolean = false,
+    val yearHasMore: Boolean = false,
     val pendingAutoTransactions: List<TransactionEntity> = emptyList(),
     val smartLearningStatus: SmartLearningStatus = SmartLearningStatus(),
     val retentionFeedback: RetentionFeedbackState = RetentionFeedbackState()
@@ -81,10 +89,39 @@ private data class SelectedMonthData(
     val categoryBudgets: List<CategoryBudgetEntity>
 )
 
+private data class InsightAggregation(
+    val monthTrend: List<TrendPoint>,
+    val yearTrend: List<TrendPoint>,
+    val monthShare: List<CategoryShare>,
+    val yearShare: List<CategoryShare>,
+    val selectedYearSummary: BalanceSummary,
+    val monthTotalCount: Int,
+    val yearTotalCount: Int
+)
+
+private data class TrendAndShareAggregation(
+    val monthTrend: List<TrendPoint>,
+    val yearTrend: List<TrendPoint>,
+    val monthShare: List<CategoryShare>,
+    val yearShare: List<CategoryShare>
+)
+
+private data class BaseUiSlice(
+    val summary: SummaryAndCategory,
+    val todayTxs: List<TransactionEntity>,
+    val yearTxs: List<TransactionEntity>,
+    val selectedMonthData: SelectedMonthData
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class CoinNestViewModel(
     private val repository: CoinNestRepository
 ) : ViewModel() {
+    private companion object {
+        const val MONTH_PAGE_SIZE = 300
+        const val YEAR_PAGE_SIZE = 500
+    }
+
     private val zone: ZoneId = ZoneId.systemDefault()
     private val dayRange = DateRangeUtils.todayRange()
     private val monthRange = DateRangeUtils.monthRange()
@@ -98,6 +135,8 @@ class CoinNestViewModel(
     }
     private val monthKey = DateRangeUtils.currentMonthKey()
     private val selectedMonthFlow = MutableStateFlow(YearMonth.now())
+    private val monthPageFlow = MutableStateFlow(1)
+    private val yearPageFlow = MutableStateFlow(1)
 
     private val summaryBaseFlow = combine(
         repository.observeSummary(dayRange.first, dayRange.last + 1),
@@ -136,9 +175,15 @@ class CoinNestViewModel(
         repository.observeSummary(range.first, range.last + 1)
     }
 
-    private val selectedMonthTransactionsFlow = selectedMonthFlow.flatMapLatest { ym ->
+    private val selectedMonthTransactionsFlow = combine(selectedMonthFlow, monthPageFlow) { ym, page ->
+        ym to page
+    }.flatMapLatest { (ym, page) ->
         val range = DateRangeUtils.monthRange(ym)
-        repository.observeTransactionsInRange(range.first, range.last + 1, limit = 4000)
+        repository.observeTransactionsInRange(
+            startInclusive = range.first,
+            endExclusive = range.last + 1,
+            limit = page * MONTH_PAGE_SIZE
+        )
     }
 
     private val previousMonthSummaryFlow = selectedMonthFlow.flatMapLatest { ym ->
@@ -149,10 +194,116 @@ class CoinNestViewModel(
     private val selectedMonthCategoryBudgetsFlow = selectedMonthFlow.flatMapLatest { ym ->
         repository.observeCategoryBudgets(DateRangeUtils.monthKey(ym))
     }
-    private val selectedYearTransactionsFlow = selectedMonthFlow.flatMapLatest { ym ->
+    private val selectedYearTransactionsFlow = combine(selectedMonthFlow, yearPageFlow) { ym, page ->
+        ym to page
+    }.flatMapLatest { (ym, page) ->
         val start = LocalDate.of(ym.year, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
         val end = LocalDate.of(ym.year + 1, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
-        repository.observeTransactionsInRange(start, end, limit = 12000)
+        repository.observeTransactionsInRange(start, end, limit = page * YEAR_PAGE_SIZE)
+    }
+
+    private val selectedYearSummaryFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val start = LocalDate.of(ym.year, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = LocalDate.of(ym.year + 1, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        repository.observeSummary(start, end)
+    }
+
+    private val selectedMonthTotalCountFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val range = DateRangeUtils.monthRange(ym)
+        repository.observeConfirmedTransactionCountInRange(range.first, range.last + 1)
+    }
+
+    private val selectedYearTotalCountFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val start = LocalDate.of(ym.year, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = LocalDate.of(ym.year + 1, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        repository.observeConfirmedTransactionCountInRange(start, end)
+    }
+
+    private val selectedMonthTrendFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val range = DateRangeUtils.monthRange(ym)
+        repository.observeExpenseByDayInRange(range.first, range.last + 1).map { rows ->
+            val byDay = rows.associate { it.bucket to it.amountCents }
+            val allDays = (1..ym.lengthOfMonth()).toList()
+            val maxBars = 15
+            val step = kotlin.math.ceil(allDays.size / maxBars.toDouble()).toInt().coerceAtLeast(1)
+            allDays.chunked(step).map { chunk ->
+                TrendPoint(
+                    label = chunk.first().toString(),
+                    expenseCents = chunk.sumOf { day -> byDay[day] ?: 0L }
+                )
+            }
+        }
+    }
+
+    private val selectedYearTrendFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val start = LocalDate.of(ym.year, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = LocalDate.of(ym.year + 1, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        repository.observeExpenseByMonthInRange(start, end).map { rows ->
+            val byMonth = rows.associate { it.bucket to it.amountCents }
+            (1..12).map { month ->
+                TrendPoint(label = "$month", expenseCents = byMonth[month] ?: 0L)
+            }
+        }
+    }
+
+    private val selectedMonthCategoryShareFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val range = DateRangeUtils.monthRange(ym)
+        repository.observeCategoryExpenseInRange(range.first, range.last + 1).map { rows ->
+            val total = rows.sumOf { it.amountCents }.coerceAtLeast(1L)
+            rows.map {
+                CategoryShare(
+                    name = it.category,
+                    amountCents = it.amountCents,
+                    ratio = it.amountCents.toFloat() / total.toFloat()
+                )
+            }
+        }
+    }
+
+    private val selectedYearCategoryShareFlow = selectedMonthFlow.flatMapLatest { ym ->
+        val start = LocalDate.of(ym.year, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = LocalDate.of(ym.year + 1, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+        repository.observeCategoryExpenseInRange(start, end).map { rows ->
+            val total = rows.sumOf { it.amountCents }.coerceAtLeast(1L)
+            rows.map {
+                CategoryShare(
+                    name = it.category,
+                    amountCents = it.amountCents,
+                    ratio = it.amountCents.toFloat() / total.toFloat()
+                )
+            }
+        }
+    }
+
+    private val trendAndShareAggregationFlow = combine(
+        selectedMonthTrendFlow,
+        selectedYearTrendFlow,
+        selectedMonthCategoryShareFlow,
+        selectedYearCategoryShareFlow
+    ) { monthTrend, yearTrend, monthShare, yearShare ->
+        TrendAndShareAggregation(
+            monthTrend = monthTrend,
+            yearTrend = yearTrend,
+            monthShare = monthShare,
+            yearShare = yearShare
+        )
+    }
+
+    private val insightAggregationFlow = combine(
+        trendAndShareAggregationFlow,
+        selectedYearSummaryFlow,
+        selectedMonthTotalCountFlow,
+        selectedYearTotalCountFlow
+    ) { trendAndShare, selectedYearSummary, monthTotalCount, yearTotalCount ->
+        InsightAggregation(
+            monthTrend = trendAndShare.monthTrend,
+            yearTrend = trendAndShare.yearTrend,
+            monthShare = trendAndShare.monthShare,
+            yearShare = trendAndShare.yearShare,
+            selectedYearSummary = selectedYearSummary,
+            monthTotalCount = monthTotalCount,
+            yearTotalCount = yearTotalCount
+        )
     }
 
     private val selectedMonthDataFlow = combine(
@@ -171,27 +322,46 @@ class CoinNestViewModel(
         )
     }
 
-    private val baseUiStateFlow = combine(
+    private val baseUiSliceFlow = combine(
         summaryAndCategoryFlow,
         repository.observeTransactionsInRange(dayRange.first, dayRange.last + 1, limit = 200),
         selectedYearTransactionsFlow,
-        selectedMonthDataFlow,
+        selectedMonthDataFlow
+    ) { summary, todayTxs, yearTxs, selectedMonthData ->
+        BaseUiSlice(
+            summary = summary,
+            todayTxs = todayTxs,
+            yearTxs = yearTxs,
+            selectedMonthData = selectedMonthData
+        )
+    }
+
+    private val baseUiStateFlow = combine(
+        baseUiSliceFlow,
+        insightAggregationFlow,
         repository.observePendingAutoTransactions(limit = 100)
-    ) { summary, todayTxs, yearTxs, selectedMonthData, pendingTxs ->
+    ) { baseSlice, insightAgg, pendingTxs ->
         HomeUiState(
-            daily = summary.daily,
-            monthly = summary.monthly,
-            yearly = summary.yearly,
-            previousYearSummary = summary.previousYearly,
-            selectedMonth = selectedMonthData.month,
-            selectedMonthSummary = selectedMonthData.summary,
-            previousMonthSummary = selectedMonthData.previousMonthSummary,
-            monthBudgetCents = summary.monthBudgetCents,
-            categories = summary.categories,
-            selectedMonthCategoryBudgets = selectedMonthData.categoryBudgets,
-            todayTransactions = todayTxs,
-            monthTransactions = selectedMonthData.transactions,
-            yearTransactions = yearTxs,
+            daily = baseSlice.summary.daily,
+            monthly = baseSlice.summary.monthly,
+            yearly = baseSlice.summary.yearly,
+            previousYearSummary = baseSlice.summary.previousYearly,
+            selectedMonth = baseSlice.selectedMonthData.month,
+            selectedMonthSummary = baseSlice.selectedMonthData.summary,
+            previousMonthSummary = baseSlice.selectedMonthData.previousMonthSummary,
+            monthBudgetCents = baseSlice.summary.monthBudgetCents,
+            categories = baseSlice.summary.categories,
+            selectedMonthCategoryBudgets = baseSlice.selectedMonthData.categoryBudgets,
+            todayTransactions = baseSlice.todayTxs,
+            monthTransactions = baseSlice.selectedMonthData.transactions,
+            yearTransactions = baseSlice.yearTxs,
+            monthTrendPoints = insightAgg.monthTrend,
+            yearTrendPoints = insightAgg.yearTrend,
+            monthCategoryShare = insightAgg.monthShare,
+            yearCategoryShare = insightAgg.yearShare,
+            selectedYearSummary = insightAgg.selectedYearSummary,
+            monthHasMore = baseSlice.selectedMonthData.transactions.size < insightAgg.monthTotalCount,
+            yearHasMore = baseSlice.yearTxs.size < insightAgg.yearTotalCount,
             pendingAutoTransactions = pendingTxs
         )
     }
@@ -278,6 +448,16 @@ class CoinNestViewModel(
 
     fun selectMonth(month: YearMonth) {
         selectedMonthFlow.value = month
+        monthPageFlow.value = 1
+        yearPageFlow.value = 1
+    }
+
+    fun loadMoreSelectedMonthTransactions() {
+        monthPageFlow.value = monthPageFlow.value + 1
+    }
+
+    fun loadMoreSelectedYearTransactions() {
+        yearPageFlow.value = yearPageFlow.value + 1
     }
 
     fun confirmPendingAutoTransaction(id: Long) {
