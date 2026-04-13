@@ -17,7 +17,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.coin_nest"
-        minSdk = 28
+        minSdk = 29
         targetSdk = 36
         val now = LocalDateTime.now(ZoneId.systemDefault())
         val autoVersionCode = (System.currentTimeMillis() / 60_000L).toInt()
@@ -71,6 +71,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("org.apache.poi:poi-ooxml:5.2.5")
     implementation(libs.work.runtime.ktx)

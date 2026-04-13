@@ -25,6 +25,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -55,10 +56,13 @@ internal fun InsightTab(
     onUpdateTransactionCategory: (Long, String, String) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onLoadMoreMonthTransactions: () -> Unit,
-    onLoadMoreYearTransactions: () -> Unit
+    onLoadMoreYearTransactions: () -> Unit,
+    openMonthDetailAtTodayToken: Int = 0,
+    onMonthDetailJumpHandled: () -> Unit = {}
 ) {
     onUpdateTransactionCategory
     val nav = rememberNavController()
+    var lastHandledMonthDetailToken by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(OverviewTabMode.Monthly) }
     var selectedWeekStart by rememberSaveable { mutableStateOf(LocalDate.now().minusDays((LocalDate.now().dayOfWeek.value - 1).toLong())) }
     var selectedWeekDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
@@ -68,6 +72,7 @@ internal fun InsightTab(
     val selectedMonth = state.selectedMonth
     val monthTx = state.monthTransactions
     val yearTx = state.yearTransactions
+    val today = remember { LocalDate.now() }
 
     val weekTx = remember(yearTx, selectedWeekStart) {
         val end = selectedWeekStart.plusDays(7)
@@ -111,6 +116,17 @@ internal fun InsightTab(
     LaunchedEffect(selectedWeekStart) {
         if (selectedWeekDate < selectedWeekStart || selectedWeekDate > selectedWeekStart.plusDays(6)) {
             selectedWeekDate = selectedWeekStart
+        }
+    }
+    LaunchedEffect(openMonthDetailAtTodayToken) {
+        if (openMonthDetailAtTodayToken > lastHandledMonthDetailToken) {
+            mode = OverviewTabMode.Monthly
+            val targetMonth = YearMonth.from(today)
+            if (selectedMonth != targetMonth) onSelectMonth(targetMonth)
+            selectedMonthDate = today
+            nav.navigate("month_detail") { launchSingleTop = true }
+            lastHandledMonthDetailToken = openMonthDetailAtTodayToken
+            onMonthDetailJumpHandled()
         }
     }
 
@@ -551,12 +567,13 @@ private fun InsightMonthCalendarCard(
             Row(modifier = Modifier.fillMaxWidth()) {
                 for (j in 0..6) {
                     val date = cells[i + j]
-                    val hasTx = date != null && (dailySummary[date]?.expenseCents ?: 0L) > 0L
+                    val expenseCents = if (date == null) 0L else (dailySummary[date]?.expenseCents ?: 0L)
+                    val hasTx = expenseCents > 0L
                     val selected = date == selectedDate
-                    Box(
+                    Column(
                         modifier = Modifier
                             .weight(1f)
-                            .height(42.dp)
+                            .height(54.dp)
                             .padding(2.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(
@@ -568,9 +585,20 @@ private fun InsightMonthCalendarCard(
                                 }
                             )
                             .clickable(enabled = date != null) { if (date != null) onSelectDate(date) },
-                        contentAlignment = Alignment.Center
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceBetween
                     ) {
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(date?.dayOfMonth?.toString().orEmpty(), color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                        if (hasTx) {
+                            Text(
+                                text = MoneyFormat.fromCents(expenseCents),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
                     }
                 }
             }

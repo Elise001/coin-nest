@@ -4,7 +4,7 @@ import com.example.coin_nest.data.model.TransactionType
 import kotlin.math.abs
 
 private val amountRegex = Regex(
-    "([+\\-−]?\\s*(?:[¥￥]|RMB|CNY)?\\s*\\d{1,7}(?:[\\.,]\\d{1,2})?)",
+    "[+\\-−]?\\s*(?:[¥￥]|RMB|CNY)?\\s*\\d{1,7}(?:[\\.,]\\d{1,2})?",
     RegexOption.IGNORE_CASE
 )
 private val currencyAnchoredAmountRegex = Regex(
@@ -28,12 +28,21 @@ private val supportedPackages = mapOf(
 private val transactionKeywords = listOf(
     "支付", "付款", "扣款", "消费", "到账", "收款", "退款", "转账", "还款", "账单", "交易"
 )
+private val strongPaymentKeywords = listOf(
+    "支付成功", "成功付款", "消费", "扣款", "收款", "到账", "退款", "转账", "还款"
+)
 private val amountContextKeywords = listOf(
-    "金额", "应付", "实付", "支付", "付款", "扣款", "消费", "到账", "收款", "退款", "转账", "元"
+    "金额", "应付", "实付", "支付", "付款", "扣款", "消费", "到账", "收款", "退款", "转账", "元", "人民币"
+)
+private val accountContextKeywords = listOf(
+    "尾号", "账号", "账户", "卡号", "末四位", "后四位", "邮箱", "手机号", "@", "***", "****"
+)
+private val nonPaymentKeywords = listOf(
+    "余额宝", "基金", "理财", "申购", "赎回", "确认成功通知", "确认金额", "收益", "分红", "净值", "持仓", "体验金"
 )
 
 private val expenseKeywords = listOf(
-    "支付成功", "向商家付款", "消费", "支出", "扣款", "实付", "还款", "自动扣款", "月结", "扣费"
+    "支付成功", "成功付款", "消费", "支出", "扣款", "实付", "还款", "自动扣款", "月结", "扣费"
 )
 
 private val incomeKeywords = listOf(
@@ -75,6 +84,19 @@ data class PaymentParseDebugResult(
     val reason: String
 )
 
+private data class ParsedAmount(
+    val amount: Double,
+    val hasMinusSign: Boolean
+)
+
+private data class AmountCandidate(
+    val raw: String,
+    val normalized: String,
+    val value: Double,
+    val index: Int,
+    val hasMinusSign: Boolean
+)
+
 object PaymentNotificationParser {
     fun isSupportedPackage(packageName: String?): Boolean {
         if (packageName.isNullOrBlank()) return false
@@ -100,6 +122,13 @@ object PaymentNotificationParser {
         if (noiseKeywords.any { merged.contains(it, ignoreCase = true) }) {
             return PaymentParseDebugResult(null, "命中噪声关键词")
         }
+        if (!looksLikeTransaction(merged)) {
+            return PaymentParseDebugResult(null, "非支付交易通知")
+        }
+        if (looksLikeNonPaymentConfirmation(merged)) {
+            return PaymentParseDebugResult(null, "非支付确认类通知")
+        }
+
         val amountMatch = extractAmount(merged)
             ?: return PaymentParseDebugResult(null, "未提取到有效金额")
         val cents = (amountMatch.amount * 100).toLong()
@@ -132,18 +161,20 @@ object PaymentNotificationParser {
     }
 }
 
-private data class ParsedAmount(val amount: Double, val hasMinusSign: Boolean)
+private fun looksLikeTransaction(merged: String): Boolean {
+    if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) return true
+    if (transactionKeywords.any { merged.contains(it, ignoreCase = true) }) return true
+    return currencyAnchoredAmountRegex.containsMatchIn(merged)
+}
 
-private fun looksLikeTransaction(packageName: String?, merged: String): Boolean {
-    if (packageName == null || !supportedPackages.containsKey(packageName)) return false
-    val hasKeyword = transactionKeywords.any { merged.contains(it, ignoreCase = true) }
-    val hasCurrency = currencyAnchoredAmountRegex.containsMatchIn(merged)
-    val hasAmountWithContext = extractAmount(merged) != null
-    return hasKeyword || hasCurrency || hasAmountWithContext
+private fun looksLikeNonPaymentConfirmation(merged: String): Boolean {
+    val hitNonPayment = nonPaymentKeywords.any { merged.contains(it, ignoreCase = true) }
+    if (!hitNonPayment) return false
+    return strongPaymentKeywords.none { merged.contains(it, ignoreCase = true) }
 }
 
 private fun inferSource(packageName: String?, merged: String): String {
-    supportedPackages[packageName].let { if (it != null) return it }
+    supportedPackages[packageName]?.let { return it }
     if (!packageName.isNullOrBlank()) {
         val pkg = packageName.lowercase()
         if (pkg == "com.tencent.mm") return "WECHAT"
@@ -170,7 +201,8 @@ private fun inferType(merged: String, hasMinusSign: Boolean, source: String): Tr
     return when {
         hasMinusSign && hasMoneyHint(merged) -> TransactionType.EXPENSE
         merged.contains("+") -> TransactionType.INCOME
-        source in setOf("ALIPAY", "WECHAT", "BANK_CARD", "CREDIT_CARD", "UNIONPAY") -> TransactionType.EXPENSE
+        source in setOf("ALIPAY", "WECHAT", "BANK_CARD", "CREDIT_CARD", "UNIONPAY") &&
+            transactionKeywords.any { merged.contains(it, ignoreCase = true) } -> TransactionType.EXPENSE
         else -> null
     }
 }
@@ -204,27 +236,41 @@ private fun suggestCategory(merged: String, type: TransactionType): Pair<String,
 }
 
 private fun extractAmount(merged: String): ParsedAmount? {
-    currencyAnchoredAmountRegex.find(merged)?.groupValues?.getOrNull(1)?.let { raw ->
-        val normalized = raw
-            .replace("−", "-")
-            .replace(",", ".")
-            .replace(" ", "")
-        val amount = normalized.toDoubleOrNull()
-        if (amount != null) {
-            return ParsedAmount(amount = abs(amount), hasMinusSign = normalized.startsWith("-"))
+    currencyAnchoredAmountRegex.findAll(merged).forEach { match ->
+        val raw = match.groupValues.getOrNull(1).orEmpty()
+        val parsed = parseRawAmount(raw) ?: return@forEach
+        if (!isLikelyAccountNumber(merged, raw, match.range.first)) {
+            return ParsedAmount(parsed.amount, parsed.hasMinusSign)
         }
     }
 
-    val match = amountRegex.findAll(merged)
-        .map { it.value.trim() }
-        .firstOrNull { value ->
-            value.any { it.isDigit() } &&
-                !value.contains("尾号") &&
-                !value.contains("****") &&
-                isAmountWithContext(merged, value)
-        } ?: return null
+    val candidates = amountRegex.findAll(merged).mapNotNull { match ->
+        val raw = match.value.trim()
+        if (!raw.any { it.isDigit() }) return@mapNotNull null
+        val parsed = parseRawAmount(raw) ?: return@mapNotNull null
+        AmountCandidate(
+            raw = raw,
+            normalized = parsed.normalized,
+            value = parsed.amount,
+            index = match.range.first,
+            hasMinusSign = parsed.hasMinusSign
+        )
+    }.toList()
+    if (candidates.isEmpty()) return null
 
-    val normalized = match
+    val best = candidates.maxByOrNull { scoreAmountCandidate(merged, it) } ?: return null
+    if (scoreAmountCandidate(merged, best) <= 0) return null
+    return ParsedAmount(best.value, best.hasMinusSign)
+}
+
+private data class ParsedRawAmount(
+    val amount: Double,
+    val hasMinusSign: Boolean,
+    val normalized: String
+)
+
+private fun parseRawAmount(raw: String): ParsedRawAmount? {
+    val normalized = raw
         .replace("¥", "")
         .replace("￥", "")
         .replace("RMB", "", ignoreCase = true)
@@ -233,17 +279,44 @@ private fun extractAmount(merged: String): ParsedAmount? {
         .replace(",", ".")
         .replace(" ", "")
     val amount = normalized.toDoubleOrNull() ?: return null
-    return ParsedAmount(amount = abs(amount), hasMinusSign = normalized.startsWith("-"))
+    return ParsedRawAmount(
+        amount = abs(amount),
+        hasMinusSign = normalized.startsWith("-"),
+        normalized = normalized
+    )
 }
 
-private fun isAmountWithContext(merged: String, rawValue: String): Boolean {
-    val idx = merged.indexOf(rawValue)
-    if (idx < 0) return false
-    val start = (idx - 10).coerceAtLeast(0)
-    val end = (idx + rawValue.length + 10).coerceAtMost(merged.length)
-    val context = merged.substring(start, end)
-    if (currencyAnchoredAmountRegex.containsMatchIn(context)) return true
-    return amountContextKeywords.any { context.contains(it, ignoreCase = true) }
+private fun scoreAmountCandidate(merged: String, candidate: AmountCandidate): Int {
+    var score = 0
+    val context = window(merged, candidate.index, candidate.raw.length, 14)
+    val hasDecimal = candidate.normalized.contains(".")
+    if (candidate.raw.contains("¥") || candidate.raw.contains("￥") ||
+        candidate.raw.contains("RMB", ignoreCase = true) || candidate.raw.contains("CNY", ignoreCase = true)
+    ) {
+        score += 8
+    }
+    if (hasDecimal) score += 6
+    if (amountContextKeywords.any { context.contains(it, ignoreCase = true) }) score += 5
+    if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) score += 2
+    if (isLikelyAccountNumber(merged, candidate.raw, candidate.index)) score -= 12
+    if (candidate.value >= 10_000 && !hasDecimal) score -= 2
+    return score
+}
+
+private fun isLikelyAccountNumber(merged: String, rawValue: String, index: Int): Boolean {
+    val context = window(merged, index, rawValue.length, 12)
+    val onlyDigits = rawValue.filter { it.isDigit() }
+    val hasAccountContext = accountContextKeywords.any { context.contains(it, ignoreCase = true) }
+    if (hasAccountContext && onlyDigits.length in 3..6) return true
+    if (context.contains("@") && onlyDigits.length in 3..6) return true
+    if (onlyDigits.length in 3..4 && context.contains("信用卡", ignoreCase = true)) return true
+    return false
+}
+
+private fun window(source: String, index: Int, len: Int, radius: Int): String {
+    val start = (index - radius).coerceAtLeast(0)
+    val end = (index + len + radius).coerceAtMost(source.length)
+    return source.substring(start, end)
 }
 
 private fun hasMoneyHint(merged: String): Boolean {
@@ -267,3 +340,4 @@ private fun buildSameSourceFingerprint(source: String, transactionRef: String?):
     val ref = transactionRef?.trim()?.takeIf { it.length >= 6 } ?: return null
     return "SRC_TXN_${source}_${ref.uppercase()}"
 }
+

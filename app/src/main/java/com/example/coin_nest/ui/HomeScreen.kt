@@ -1,26 +1,16 @@
 ﻿package com.example.coin_nest.ui
 
-import android.app.DatePickerDialog
-import android.content.Intent
-import android.graphics.Paint
-import android.net.Uri
-import android.os.PowerManager
-import android.provider.Settings
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -28,20 +18,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -50,15 +40,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -66,32 +55,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.util.MoneyFormat
-import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.YearMonth
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import kotlin.math.roundToInt
-import android.graphics.Color as AndroidColor
-
 internal val SuccessColor = Color(0xFF2E7D32)
 internal val DangerColor = Color(0xFFB23A30)
 internal val WarningColor = Color(0xFFD8894A)
@@ -122,6 +98,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     var selectedMainTab by rememberSaveable { mutableIntStateOf(initialMainTabIndex.coerceIn(0, MainTab.entries.size - 1)) }
+    var insightOpenMonthDetailToken by rememberSaveable { mutableIntStateOf(0) }
     val mainTabs = remember { MainTab.entries }
     val pageBackground = MaterialTheme.colorScheme.background
     LaunchedEffect(initialMainTabIndex) {
@@ -151,7 +128,11 @@ fun HomeScreen(
             when (mainTabs[selectedMainTab]) {
                 MainTab.Home -> HomeDashboardTab(
                     state = state,
-                    onOpenInsight = { selectedMainTab = MainTab.Insight.ordinal }
+                    onOpenInsight = { selectedMainTab = MainTab.Insight.ordinal },
+                    onOpenInsightMonthCalendar = {
+                        selectedMainTab = MainTab.Insight.ordinal
+                        insightOpenMonthDetailToken++
+                    }
                 )
                 MainTab.Record -> RecordTab(state, onAddTransaction, onConfirmPendingAuto, onIgnorePendingAuto)
                 MainTab.Insight -> InsightTab(
@@ -160,7 +141,9 @@ fun HomeScreen(
                     onUpdateTransactionCategory = onUpdateTransactionCategory,
                     onDeleteTransaction = onDeleteTransaction,
                     onLoadMoreMonthTransactions = onLoadMoreMonthTransactions,
-                    onLoadMoreYearTransactions = onLoadMoreYearTransactions
+                    onLoadMoreYearTransactions = onLoadMoreYearTransactions,
+                    openMonthDetailAtTodayToken = insightOpenMonthDetailToken,
+                    onMonthDetailJumpHandled = { insightOpenMonthDetailToken = 0 }
                 )
                 MainTab.Profile -> SettingsTab(
                     state = state,
@@ -187,68 +170,141 @@ private fun BottomMainTabs(
     selectedIndex: Int,
     onSelect: (Int) -> Unit
 ) {
-    Row(
+    val tabSelectedColor = Color(0xFFB66F44)
+    val tabUnselectedColor = Color(0xFF7A6A5E)
+    val tabActiveBgColor = Color(0xFFF3E5D7)
+    val tabActiveStrokeColor = Color(0xFFE0C4AA)
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.98f))
+            .padding(horizontal = 6.dp, vertical = 1.dp)
     ) {
-        tabs.forEachIndexed { index, tab ->
-            val selected = index == selectedIndex
-            val interactionSource = remember { MutableInteractionSource() }
-            val pressed by interactionSource.collectIsPressedAsState()
-            val scale by animateFloatAsState(
-                targetValue = if (pressed) 0.985f else 1f,
-                animationSpec = tween(durationMillis = 120),
-                label = "tab_press_scale"
-            )
-            val alpha by animateFloatAsState(
-                targetValue = if (pressed) 0.92f else 1f,
-                animationSpec = tween(durationMillis = 120),
-                label = "tab_press_alpha"
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        this.alpha = alpha
-                    }
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent)
-                    .clickable(
-                        interactionSource = interactionSource,
-                        indication = null
-                    ) { onSelect(index) }
-                    .padding(vertical = 9.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                .align(Alignment.TopStart)
+        )
+
+        val itemWidth = maxWidth / tabs.size
+        val activePillHorizontalInset = 3.dp
+        val activePillWidth = itemWidth - (activePillHorizontalInset * 2)
+        val activePillHeight = 34.dp
+        val activePillX by animateDpAsState(
+            targetValue = itemWidth * selectedIndex + activePillHorizontalInset,
+            animationSpec = tween(durationMillis = 240),
+            label = "tab_active_pill_x"
+        )
+        val indicatorWidth = 20.dp
+        val indicatorX by animateDpAsState(
+            targetValue = itemWidth * selectedIndex + (itemWidth - indicatorWidth) / 2f,
+            animationSpec = tween(durationMillis = 220),
+            label = "tab_indicator_x"
+        )
+
+        Box(
+            modifier = Modifier
+                .offset(x = activePillX, y = 6.dp)
+                .width(activePillWidth)
+                .height(activePillHeight)
+                .clip(RoundedCornerShape(14.dp))
+                .background(tabActiveBgColor.copy(alpha = 0.42f))
+                .border(0.8.dp, tabActiveStrokeColor.copy(alpha = 0.52f), RoundedCornerShape(14.dp))
+        )
+
+        Box(
+            modifier = Modifier
+                .offset(x = indicatorX, y = 0.dp)
+                .width(indicatorWidth)
+                .height(2.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(tabSelectedColor.copy(alpha = 0.62f))
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                val selected = index == selectedIndex
+                val interactionSource = remember { MutableInteractionSource() }
+                val pressed by interactionSource.collectIsPressedAsState()
+                val scale by animateFloatAsState(
+                    targetValue = if (pressed) 0.985f else 1f,
+                    animationSpec = tween(durationMillis = 120),
+                    label = "tab_press_scale"
+                )
+                val alpha by animateFloatAsState(
+                    targetValue = if (pressed) 0.92f else 1f,
+                    animationSpec = tween(durationMillis = 120),
+                    label = "tab_press_alpha"
+                )
+                val iconLift by animateDpAsState(
+                    targetValue = if (selected) (-1).dp else 0.dp,
+                    animationSpec = tween(durationMillis = 180),
+                    label = "tab_icon_lift"
+                )
+                Column(
                     modifier = Modifier
-                        .width(if (selected) 18.dp else 8.dp)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.95f) else Color.Transparent)
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = tab.title,
-                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.95f),
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                        .weight(1f)
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            this.alpha = alpha
+                        }
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = null
+                        ) { onSelect(index) }
+                        .padding(vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = tabIcon(tab),
+                        contentDescription = tab.title,
+                        modifier = Modifier
+                            .offset(y = iconLift)
+                            .width(17.dp)
+                            .height(17.dp),
+                        tint = if (selected) tabSelectedColor else tabUnselectedColor.copy(alpha = 0.85f)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Box(
+                        modifier = Modifier.width(38.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = tab.title,
+                            color = if (selected) tabSelectedColor else tabUnselectedColor.copy(alpha = 0.9f),
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            style = MaterialTheme.typography.labelSmall,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
         }
     }
 }
 
+private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
+    MainTab.Home -> Icons.Filled.Home
+    MainTab.Record -> Icons.Filled.Edit
+    MainTab.Insight -> Icons.Filled.BarChart
+    MainTab.Profile -> Icons.Filled.Person
+}
+
 @Composable
 private fun HomeDashboardTab(
     state: HomeUiState,
-    onOpenInsight: () -> Unit
+    onOpenInsight: () -> Unit,
+    onOpenInsightMonthCalendar: () -> Unit
 ) {
     val anomalies = remember(
         state.monthTransactions,
@@ -276,7 +332,8 @@ private fun HomeDashboardTab(
                 income = state.selectedMonthSummary.incomeCents,
                 expense = state.selectedMonthSummary.expenseCents,
                 balance = state.selectedMonthSummary.balanceCents,
-                highlight = true
+                highlight = true,
+                onClick = onOpenInsightMonthCalendar
             )
         }
         item {
@@ -377,17 +434,25 @@ private fun SummaryCard(
         balance < 0L -> Color(0xFFB23A30)
         else -> MaterialTheme.colorScheme.onSurface
     }
+    val clickable = onClick != null
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = bg),
+        border = if (clickable) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)) else null,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = if (onClick != null) modifier.clickable { onClick() } else modifier
+        modifier = if (clickable) modifier.clickable { onClick() } else modifier
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(title, fontWeight = FontWeight.SemiBold)
                 if (!actionText.isNullOrBlank() && onAction != null) {
                     OutlinedButton(onClick = onAction) { Text(actionText) }
+                } else if (clickable) {
+                    Text(
+                        "点击查看月日历 >",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
