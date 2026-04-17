@@ -25,6 +25,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
+internal const val AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS = 25_000L
+
+internal fun isWithinAutoSameSourceWindow(existingOccurredAt: Long, incomingOccurredAt: Long): Boolean {
+    return kotlin.math.abs(existingOccurredAt - incomingOccurredAt) <= AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS
+}
+
+internal fun shouldDedupeByAutoChannel(existingChannel: String, incomingChannel: String): Boolean {
+    val e = existingChannel.uppercase()
+    val i = incomingChannel.uppercase()
+    if (e.isBlank() || i.isBlank()) return false
+    return e != i
+}
+
 data class AutoTransactionInsertResult(
     val insertedId: Long?,
     val reason: String,
@@ -437,6 +450,7 @@ class CoinNestRepository(context: Context) {
         note: String,
         fingerprint: String?,
         occurredAtEpochMs: Long,
+        channel: String = "NOTIFY",
         parent: String = "\u5f85\u5206\u7c7b",
         child: String = "\u81ea\u52a8\u8bc6\u522b"
     ): AutoTransactionInsertResult = withContext(Dispatchers.IO) {
@@ -456,13 +470,32 @@ class CoinNestRepository(context: Context) {
             )
         }
 
+        if (existsRecentSameSourceWindowDuplicate(
+                amountCents = amountCents,
+                type = autoType,
+                source = source,
+                occurredAtEpochMs = occurredAt,
+                channel = channel
+            )
+        ) {
+            return@withContext AutoTransactionInsertResult(
+                insertedId = null,
+                reason = "CROSS_CHANNEL_DUPLICATE_BY_WINDOW",
+                shouldNotify = false
+            )
+        }
+
         // Cross-source dedupe: link the secondary channel record as non-accounting duplicate.
-        val linkedAnchorId = findCrossSourceAnchorId(
-            amountCents = amountCents,
-            type = autoType,
-            source = source,
-            occurredAtEpochMs = occurredAt
-        )
+        val linkedAnchorId = if (channel.uppercase() == "NOTIFY") {
+            null
+        } else {
+            findCrossSourceAnchorId(
+                amountCents = amountCents,
+                type = autoType,
+                source = source,
+                occurredAtEpochMs = occurredAt
+            )
+        }
         val finalStatus = if (linkedAnchorId != null) STATUS_LINKED_DUPLICATE else STATUS_PENDING
         val finalNote = if (linkedAnchorId != null) {
             "$note [跨源关联->#$linkedAnchorId]"
@@ -497,6 +530,7 @@ class CoinNestRepository(context: Context) {
             put("created_at_epoch_ms", receivedAt)
             put("status", finalStatus)
             put("fingerprint", fingerprint)
+            put("tag", "AUTO_CH_${channel.uppercase()}")
         }
         val insertedId = db.insertWithOnConflict(
             "transactions",
@@ -584,6 +618,50 @@ class CoinNestRepository(context: Context) {
         return when (source.uppercase()) {
             "BANK_CARD", "CREDIT_CARD", "UNIONPAY" -> setOf("ALIPAY", "WECHAT")
             else -> emptySet()
+        }
+    }
+
+    private fun existsRecentSameSourceWindowDuplicate(
+        amountCents: Long,
+        type: String,
+        source: String,
+        occurredAtEpochMs: Long,
+        channel: String
+    ): Boolean {
+        val normalizedChannel = channel.uppercase()
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT tag
+            FROM transactions
+            WHERE amount_cents = ?
+              AND type = ?
+              AND source = ?
+              AND status IN (?, ?, ?)
+              AND ABS(occurred_at_epoch_ms - ?) <= ?
+              AND tag LIKE 'AUTO_CH_%'
+            ORDER BY occurred_at_epoch_ms DESC
+            LIMIT 8
+            """.trimIndent(),
+            arrayOf(
+                amountCents.toString(),
+                type,
+                source,
+                STATUS_PENDING,
+                STATUS_CONFIRMED,
+                STATUS_LINKED_DUPLICATE,
+                occurredAtEpochMs.toString(),
+                AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS.toString()
+            )
+        )
+        return cursor.use { c ->
+            while (c.moveToNext()) {
+                val tag = c.getString(c.getColumnIndexOrThrow("tag")).orEmpty()
+                val existingChannel = tag.removePrefix("AUTO_CH_").uppercase()
+                if (shouldDedupeByAutoChannel(existingChannel, normalizedChannel)) {
+                    return@use true
+                }
+            }
+            false
         }
     }
 

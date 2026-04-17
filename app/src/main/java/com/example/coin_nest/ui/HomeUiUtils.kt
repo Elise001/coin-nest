@@ -10,9 +10,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.TextUtils
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.example.coin_nest.autobook.AutoBookTelemetry
+import com.example.coin_nest.autobook.PaymentAccessibilityService
 import com.example.coin_nest.autobook.PaymentNotificationListener
 import com.example.coin_nest.data.db.TransactionEntity
 import java.time.Instant
@@ -103,6 +105,11 @@ internal enum class ListenerPermissionActionResult {
     OPENED_SETTINGS
 }
 
+internal enum class AccessibilityPermissionActionResult {
+    ALREADY_ENABLED,
+    OPENED_SETTINGS
+}
+
 internal fun getAutoBookHealthStatus(context: Context): AutoBookHealthStatus {
     val requiredChecks = mutableListOf<AutoBookCheckItem>()
     val optionalChecks = mutableListOf<AutoBookCheckItem>()
@@ -170,6 +177,20 @@ internal fun getAutoBookHealthStatus(context: Context): AutoBookHealthStatus {
     val alipayCheck = paymentAppCheck(context, ALIPAY_PACKAGE_NAME, "支付宝支付通知（必要）")
     requiredChecks += wechatCheck
     requiredChecks += alipayCheck
+
+    optionalChecks += if (isAccessibilityServiceEnabled(context)) {
+        AutoBookCheckItem(
+            title = "支付成功页识别（无障碍）",
+            detail = "已开启",
+            state = AutoBookCheckState.PASS
+        )
+    } else {
+        AutoBookCheckItem(
+            title = "支付成功页识别（无障碍）",
+            detail = "建议开启",
+            state = AutoBookCheckState.UNKNOWN
+        )
+    }
 
     val batteryIgnored = isIgnoringBatteryOptimizations(context)
     optionalChecks += when (batteryIgnored) {
@@ -292,6 +313,16 @@ private fun isAppNotificationEnabled(context: Context, packageName: String, uid:
     }.getOrNull()
 }
 
+internal fun checkAndOpenAccessibilityPermission(context: Context): AccessibilityPermissionActionResult {
+    if (isAccessibilityServiceEnabled(context)) return AccessibilityPermissionActionResult.ALREADY_ENABLED
+    context.startActivity(
+        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    )
+    return AccessibilityPermissionActionResult.OPENED_SETTINGS
+}
+
 private fun forceRebindNotificationListener(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
     runCatching {
@@ -348,6 +379,19 @@ private fun isXiaomiFamilyDevice(): Boolean {
         brand.contains("redmi") ||
         brand.contains("poco") ||
         manufacturer.contains("xiaomi")
+}
+
+private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+    val expected = ComponentName(context, PaymentAccessibilityService::class.java).flattenToString()
+    val enabled = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+    ) ?: return false
+    val splitter = TextUtils.SimpleStringSplitter(':').apply { setString(enabled) }
+    while (splitter.hasNext()) {
+        if (splitter.next().equals(expected, ignoreCase = true)) return true
+    }
+    return false
 }
 
 private fun toChineseReason(raw: String): String {

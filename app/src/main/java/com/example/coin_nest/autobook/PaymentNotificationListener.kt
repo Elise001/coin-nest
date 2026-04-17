@@ -86,6 +86,7 @@ class PaymentNotificationListener : NotificationListenerService() {
                     note = parsed.note,
                     fingerprint = parsed.fingerprint,
                     occurredAtEpochMs = parsed.occurredAtEpochMs,
+                    channel = "NOTIFY",
                     parent = parsed.parentCategory,
                     child = parsed.childCategory
                 )

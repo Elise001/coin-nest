@@ -353,6 +353,22 @@ internal fun SettingsTab(
                         Text("优化项", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(8.dp))
                         PrimaryActionButton(
+                            text = "去开启无障碍功能（提升稳定）",
+                            onClick = {
+                                when (checkAndOpenAccessibilityPermission(context)) {
+                                    AccessibilityPermissionActionResult.ALREADY_ENABLED ->
+                                        Toast.makeText(context, "无障碍识别已开启", Toast.LENGTH_SHORT).show()
+                                    AccessibilityPermissionActionResult.OPENED_SETTINGS ->
+                                        Toast.makeText(context, "请在系统无障碍页开启 Coin Nest 无障碍功能", Toast.LENGTH_SHORT).show()
+                                }
+                                autoBookHealthRefreshTick++
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            containerColor = WarningColor
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        PrimaryActionButton(
                             text = "去开启后台保活（提升稳定）",
                             onClick = {
                                 try {

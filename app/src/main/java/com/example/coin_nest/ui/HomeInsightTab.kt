@@ -611,14 +611,33 @@ private fun InsightTransactionRow(tx: TransactionEntity, onDelete: () -> Unit) {
     val prefix = if (tx.type == "INCOME") "+" else "-"
     val amountColor = if (tx.type == "INCOME") SuccessColor else DangerColor
     val timeText = remember(tx.occurredAtEpochMs) { Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter) }
-    GlassCard {
+    val sourceLabel = formatSourceLabel(tx.source)
+    val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
+    var showNoteDialog by rememberSaveable(tx.id) { mutableStateOf(false) }
+    GlassCard(modifier = Modifier.clickable { showNoteDialog = true }) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("$prefix${MoneyFormat.fromCents(tx.amountCents)}", fontWeight = FontWeight.Bold, color = amountColor, fontFamily = FontFamily.Monospace)
                 Text("${tx.parentCategory}/${tx.childCategory}", style = MaterialTheme.typography.bodySmall)
                 Text(timeText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("来源：$sourceLabel", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (displayNote.isNotBlank()) {
+                    Text(
+                        text = "备注：$displayNote",
+                        maxLines = 1,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
             Text("删除", color = DangerColor, modifier = Modifier.clickable { onDelete() })
         }
+    }
+    if (showNoteDialog) {
+        NoteDetailDialog(
+            title = "流水备注",
+            source = sourceLabel,
+            note = displayNote,
+            onDismiss = { showNoteDialog = false }
+        )
     }
 }

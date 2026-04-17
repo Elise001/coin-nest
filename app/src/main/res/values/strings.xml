@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Coin Nest</string>
     <string name="notification_service_label">Coin Nest 自动记账监听</string>
+    <string name="accessibility_service_label">Coin Nest 支付成功识别</string>
 </resources>

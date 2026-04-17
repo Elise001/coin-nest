@@ -11,8 +11,8 @@ class PaymentNotificationParserTest {
     fun `parse wechat expense notification`() {
         val parsed = PaymentNotificationParser.parse(
             packageName = "com.tencent.mm",
-            title = "WeChat Pay",
-            text = "Payment success CNY32.50 for food",
+            title = "微信支付",
+            text = "支付成功，金额￥32.50，餐饮消费",
             postTime = 1_710_000_000_000
         )
 
@@ -26,8 +26,8 @@ class PaymentNotificationParserTest {
     fun `parse alipay refund as income`() {
         val parsed = PaymentNotificationParser.parse(
             packageName = "com.eg.android.AlipayGphone",
-            title = "Alipay",
-            text = "Refund received CNY18.80",
+            title = "支付宝",
+            text = "退款到账，金额￥18.80",
             postTime = 1_710_000_500_000
         )
 
@@ -42,10 +42,11 @@ class PaymentNotificationParserTest {
     fun `ignore non transaction notification`() {
         val parsed = PaymentNotificationParser.parse(
             packageName = "com.tencent.mm",
-            title = "WeChat",
-            text = "Login verification code 123456",
+            title = "微信",
+            text = "登录验证码 123456，请勿泄露",
             postTime = 1_710_001_000_000
         )
         assertNull(parsed)
     }
 }
+

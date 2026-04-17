@@ -32,6 +32,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -44,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -359,7 +361,7 @@ private fun HomeDashboardTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("今天流水", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text("今日流水", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Text(
                         "查看洞察 >",
                         style = MaterialTheme.typography.bodySmall,
@@ -386,7 +388,7 @@ private fun HomeDashboardTab(
             }
         }
         item {
-            GlassCard {
+            GlassCard(modifier = Modifier.clickable { onOpenInsight() }) {
                 Text("异常提醒", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(6.dp))
                 if (keyAnomalies.isEmpty()) {
@@ -401,12 +403,6 @@ private fun HomeDashboardTab(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                     }
-                    Text(
-                        "查看完整洞察",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.clickable { onOpenInsight() }
-                    )
                 }
             }
         }
@@ -681,7 +677,9 @@ internal fun PendingTransactionRow(
 ) {
     val smartTag = remember(tx.note) { parseSmartTag(tx.note) }
     val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
+    var showNoteDialog by rememberSaveable(tx.id) { androidx.compose.runtime.mutableStateOf(false) }
     Card(
+        modifier = Modifier.clickable { showNoteDialog = true },
         shape = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.24f)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -692,8 +690,20 @@ internal fun PendingTransactionRow(
             val txLabel = if (tx.type == "INCOME") "收入" else "支出"
             Text("待确认$txLabel $prefix${MoneyFormat.fromCents(tx.amountCents)}", fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(2.dp))
-            val notePart = if (displayNote.isBlank()) "" else "  $displayNote"
-            Text("${tx.source}$notePart", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            Text(
+                text = tx.source,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (displayNote.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "备注：$displayNote",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             if (!smartTag.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
@@ -708,6 +718,14 @@ internal fun PendingTransactionRow(
                 Button(onClick = onConfirm, modifier = Modifier.weight(1f)) { Text("确认入账") }
             }
         }
+    }
+    if (showNoteDialog) {
+        NoteDetailDialog(
+            title = "待确认备注",
+            source = formatSourceLabel(tx.source),
+            note = displayNote,
+            onDismiss = { showNoteDialog = false }
+        )
     }
     Spacer(modifier = Modifier.height(8.dp))
 }
@@ -725,7 +743,9 @@ private fun TransactionRow(
     val timeText = remember(tx.occurredAtEpochMs) { Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter) }
     val smartTag = remember(tx.note) { parseSmartTag(tx.note) }
     val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
+    var showNoteDialog by rememberSaveable(tx.id) { androidx.compose.runtime.mutableStateOf(false) }
     Card(
+        modifier = Modifier.clickable { showNoteDialog = true },
         shape = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.24f)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -793,6 +813,53 @@ private fun TransactionRow(
             }
         }
     }
+    if (showNoteDialog) {
+        NoteDetailDialog(
+            title = "流水备注",
+            source = sourceLabel,
+            note = displayNote,
+            onDismiss = { showNoteDialog = false }
+        )
+    }
+}
+
+@Composable
+internal fun NoteDetailDialog(
+    title: String,
+    source: String,
+    note: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "来源：$source",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = note.ifBlank { "无备注" },
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("知道了")
+            }
+        }
+    )
 }
 
 private fun parseSmartTag(note: String): String? {
@@ -885,6 +952,7 @@ internal enum class GlassCardTone { Neutral, Warning }
 @Composable
 internal fun GlassCard(
     tone: GlassCardTone = GlassCardTone.Neutral,
+    modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val container = when (tone) {
@@ -896,6 +964,7 @@ internal fun GlassCard(
         GlassCardTone.Warning -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f)
     }
     Card(
+        modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, border),
         colors = CardDefaults.cardColors(containerColor = container),
