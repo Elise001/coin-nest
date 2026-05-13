@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,6 +48,7 @@ import com.example.coin_nest.util.MoneyFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @Composable
@@ -58,7 +60,8 @@ internal fun InsightTab(
     onLoadMoreMonthTransactions: () -> Unit,
     onLoadMoreYearTransactions: () -> Unit,
     openMonthDetailAtTodayToken: Int = 0,
-    onMonthDetailJumpHandled: () -> Unit = {}
+    onMonthDetailJumpHandled: () -> Unit = {},
+    onOpenBudgetSettings: () -> Unit = {}
 ) {
     onUpdateTransactionCategory
     val nav = rememberNavController()
@@ -68,6 +71,8 @@ internal fun InsightTab(
     var selectedWeekDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
     var selectedMonthDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
     var deleteTx by remember { mutableStateOf<TransactionEntity?>(null) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchType by rememberSaveable { mutableStateOf(LocalSearchType.All) }
 
     val selectedMonth = state.selectedMonth
     val monthTx = state.monthTransactions
@@ -145,6 +150,14 @@ internal fun InsightTab(
                         balance = state.selectedMonthSummary.balanceCents
                     )
                 }
+                item {
+                    val focusShares = when (mode) {
+                        OverviewTabMode.Weekly -> state.monthCategoryShare
+                        OverviewTabMode.Monthly -> state.monthCategoryShare
+                        OverviewTabMode.Yearly -> state.yearCategoryShare
+                    }
+                    SpendingFocusCard(mode = mode, shares = focusShares, onOpenBudgetSettings = onOpenBudgetSettings)
+                }
                 item { AchievementMotivationCard(feedback = state.retentionFeedback) }
                 item {
                     when (mode) {
@@ -169,6 +182,67 @@ internal fun InsightTab(
                         title = "异常与建议",
                         subtitle = if (anomalies.isEmpty()) "暂无异常" else "发现 ${anomalies.size} 条风险提示"
                     ) { nav.navigate("anomaly_detail") }
+                }
+                item {
+                    InsightEntryCard(
+                        title = "本地找账",
+                        subtitle = "按金额、分类、来源、备注快速定位流水"
+                    ) { nav.navigate("local_search") }
+                }
+            }
+        }
+
+        composable("local_search") {
+            val results = remember(yearTx, searchQuery, searchType) {
+                filterLocalTransactions(
+                    transactions = yearTx,
+                    query = searchQuery,
+                    type = searchType
+                )
+            }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item {
+                    LocalSearchControlCard(
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it },
+                        type = searchType,
+                        onTypeChange = { searchType = it }
+                    )
+                }
+                item {
+                    LocalSearchSummaryCard(
+                        query = searchQuery,
+                        results = results,
+                        hasMore = state.yearHasMore,
+                        onLoadMore = onLoadMoreYearTransactions
+                    )
+                }
+                if (results.isEmpty()) {
+                    item {
+                        GlassCard {
+                            Text("没有找到匹配流水", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "可尝试输入金额、来源、分类或备注关键词；如果年份数据较多，也可以先加载更多。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    items(results.take(80), key = { it.id }) { tx ->
+                        InsightTransactionRow(tx = tx, onDelete = { deleteTx = tx })
+                    }
+                    if (results.size > 80) {
+                        item {
+                            GlassCard {
+                                Text("已显示前 80 条，请增加关键词缩小范围。", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -434,6 +508,200 @@ private fun InsightMetricStrip(income: Long, expense: Long, balance: Long) {
             MetricPill("结余", MoneyFormat.fromCents(balance), Modifier.weight(1f))
         }
     }
+}
+
+@Composable
+private fun SpendingFocusCard(
+    mode: OverviewTabMode,
+    shares: List<CategoryShare>,
+    onOpenBudgetSettings: () -> Unit
+) {
+    val insight = remember(mode, shares) { buildSpendingFocusInsight(mode, shares) }
+    GlassCard {
+        Text("优先控制分类", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+        if (insight == null) {
+            Text(
+                "暂无足够分类数据，先保持自动记账，形成一周以上样本后再看重点。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            return@GlassCard
+        }
+        Text(
+            insight.summaryText,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(insight.actionText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onOpenBudgetSettings, modifier = Modifier.fillMaxWidth()) {
+            Text("去设置分类预算")
+        }
+    }
+}
+
+private data class SpendingFocusInsight(
+    val summaryText: String,
+    val actionText: String
+)
+
+private fun buildSpendingFocusInsight(
+    mode: OverviewTabMode,
+    shares: List<CategoryShare>
+): SpendingFocusInsight? {
+    val top = shares.maxByOrNull { it.amountCents }?.takeIf { it.amountCents > 0L } ?: return null
+    val periodLabel = when (mode) {
+        OverviewTabMode.Weekly -> "近期"
+        OverviewTabMode.Monthly -> "本月"
+        OverviewTabMode.Yearly -> "今年"
+    }
+    val ratioPercent = (top.ratio * 100).toInt()
+    val actionText = when {
+        top.ratio >= 0.45f -> "占比偏集中，建议先给这个分类设一个小上限，连续 3 天观察变化。"
+        top.ratio >= 0.28f -> "这是当前最大支出来源，建议优先检查是否有可延后或可替代消费。"
+        else -> "支出结构较分散，建议先关注高频小额消费，避免无感累积。"
+    }
+    return SpendingFocusInsight(
+        summaryText = "$periodLabel「${top.name}」支出 ${MoneyFormat.fromCents(top.amountCents)}，占比 $ratioPercent%。",
+        actionText = actionText
+    )
+}
+
+private enum class LocalSearchType(val title: String) {
+    All("全部"),
+    Expense("支出"),
+    Income("收入")
+}
+
+@Composable
+private fun LocalSearchControlCard(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    type: LocalSearchType,
+    onTypeChange: (LocalSearchType) -> Unit
+) {
+    GlassCard {
+        Text("本地找账", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            "搜索本年已加载流水，不联网、不上传。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("金额 / 分类 / 来源 / 备注") },
+            placeholder = { Text("例如 13.70、餐饮、支付宝") }
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            LocalSearchType.entries.forEach { item ->
+                val selected = item == type
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+                        .border(
+                            width = 1.dp,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                            } else {
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onTypeChange(item) }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalSearchSummaryCard(
+    query: String,
+    results: List<TransactionEntity>,
+    hasMore: Boolean,
+    onLoadMore: () -> Unit
+) {
+    val incomeCents = remember(results) { results.filter { it.type == "INCOME" }.sumOf { it.amountCents } }
+    val expenseCents = remember(results) { results.filter { it.type == "EXPENSE" }.sumOf { it.amountCents } }
+    GlassCard {
+        Text(
+            text = if (query.isBlank()) "当前展示本年已加载流水" else "找到 ${results.size} 条匹配流水",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricPill("收入", MoneyFormat.fromCents(incomeCents), Modifier.weight(1f))
+            MetricPill("支出", MoneyFormat.fromCents(expenseCents), Modifier.weight(1f))
+        }
+        if (hasMore) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onLoadMore, modifier = Modifier.fillMaxWidth()) {
+                Text("加载更多本年流水")
+            }
+        }
+    }
+}
+
+private fun filterLocalTransactions(
+    transactions: List<TransactionEntity>,
+    query: String,
+    type: LocalSearchType
+): List<TransactionEntity> {
+    val terms = query
+        .trim()
+        .lowercase(Locale.ROOT)
+        .split(Regex("\\s+"))
+        .filter { it.isNotBlank() }
+    return transactions
+        .asSequence()
+        .filter { tx ->
+            when (type) {
+                LocalSearchType.All -> true
+                LocalSearchType.Expense -> tx.type == "EXPENSE"
+                LocalSearchType.Income -> tx.type == "INCOME"
+            }
+        }
+        .filter { tx -> terms.isEmpty() || terms.all { term -> localSearchText(tx).contains(term) } }
+        .sortedByDescending { it.occurredAtEpochMs }
+        .toList()
+}
+
+private fun localSearchText(tx: TransactionEntity): String {
+    val typeLabel = if (tx.type == "INCOME") "收入" else "支出"
+    val amountYuan = "%.2f".format(Locale.US, tx.amountCents / 100.0)
+    val timeText = Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter)
+    return listOf(
+        typeLabel,
+        amountYuan,
+        MoneyFormat.fromCents(tx.amountCents),
+        tx.amountCents.toString(),
+        tx.parentCategory,
+        tx.childCategory,
+        tx.source,
+        formatSourceLabel(tx.source),
+        tx.note,
+        timeText
+    ).joinToString(" ").lowercase(Locale.ROOT)
 }
 
 @Composable

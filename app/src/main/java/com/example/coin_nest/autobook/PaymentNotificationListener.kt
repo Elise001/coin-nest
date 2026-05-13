@@ -2,6 +2,7 @@ package com.example.coin_nest.autobook
 
 import android.content.ComponentName
 import android.app.Notification
+import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
@@ -170,6 +171,7 @@ class PaymentNotificationListener : NotificationListenerService() {
 
     private fun debugPopup(msg: String) {
         Log.d("AutoBookDebug", msg)
+        if (!isDebuggable()) return
         val now = System.currentTimeMillis()
         if (now - lastPopupMs < 500) return
         lastPopupMs = now
@@ -179,6 +181,10 @@ class PaymentNotificationListener : NotificationListenerService() {
                 Toast.makeText(applicationContext, display.take(80), Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    private fun isDebuggable(): Boolean {
+        return applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     }
 
     private fun mapDebugMessageToChinese(raw: String): String {
@@ -244,6 +250,7 @@ class PaymentNotificationListener : NotificationListenerService() {
         val upper = text.uppercase()
         return when {
             upper.contains("SAME_SOURCE_DUPLICATE_BY_TXN_REF") -> "同源重复（同交易号）"
+            upper.contains("AUTO_DUPLICATE_BY_WINDOW") -> "短时间重复自动记账"
             upper.contains("DUPLICATE_OR_CONFLICT") -> "重复或数据库冲突"
             upper.contains("CROSS_SOURCE_LINKED") -> "跨渠道关联（已合并）"
             upper.contains("INSERTED") -> "已入库"

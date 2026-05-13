@@ -101,6 +101,7 @@ fun HomeScreen(
 ) {
     var selectedMainTab by rememberSaveable { mutableIntStateOf(initialMainTabIndex.coerceIn(0, MainTab.entries.size - 1)) }
     var insightOpenMonthDetailToken by rememberSaveable { mutableIntStateOf(0) }
+    var settingsOpenBudgetToken by rememberSaveable { mutableIntStateOf(0) }
     val mainTabs = remember { MainTab.entries }
     val pageBackground = MaterialTheme.colorScheme.background
     LaunchedEffect(initialMainTabIndex) {
@@ -145,7 +146,11 @@ fun HomeScreen(
                     onLoadMoreMonthTransactions = onLoadMoreMonthTransactions,
                     onLoadMoreYearTransactions = onLoadMoreYearTransactions,
                     openMonthDetailAtTodayToken = insightOpenMonthDetailToken,
-                    onMonthDetailJumpHandled = { insightOpenMonthDetailToken = 0 }
+                    onMonthDetailJumpHandled = { insightOpenMonthDetailToken = 0 },
+                    onOpenBudgetSettings = {
+                        selectedMainTab = MainTab.Profile.ordinal
+                        settingsOpenBudgetToken++
+                    }
                 )
                 MainTab.Profile -> SettingsTab(
                     state = state,
@@ -154,7 +159,9 @@ fun HomeScreen(
                     onSetCategoryBudget = onSetCategoryBudget,
                     onExportBackup = onExportBackup,
                     onClearSmartRules = onClearSmartRules,
-                    onImportBackup = onImportBackup
+                    onImportBackup = onImportBackup,
+                    openBudgetAtToken = settingsOpenBudgetToken,
+                    onBudgetJumpHandled = { settingsOpenBudgetToken = 0 }
                 )
             }
         }
@@ -491,6 +498,14 @@ private fun BudgetProgressCard(expense: Long, budget: Long, month: YearMonth) {
         else -> month.lengthOfMonth()
     }
     val dailySuggestionCents = if (remainingDays > 0) remainingBudget.coerceAtLeast(0L) / remainingDays else 0L
+    val monthProjection = remember(expense, budget, month, today) {
+        buildMonthBudgetProjection(
+            expense = expense,
+            budget = budget,
+            month = month,
+            today = today
+        )
+    }
     GlassCard {
         Text("预算进度", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(6.dp))
@@ -517,6 +532,73 @@ private fun BudgetProgressCard(expense: Long, budget: Long, month: YearMonth) {
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (monthProjection != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "月底预测：${MoneyFormat.fromCents(monthProjection.projectedExpenseCents)}（${monthProjection.statusText}）",
+                style = MaterialTheme.typography.bodySmall,
+                color = monthProjection.statusColor,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = monthProjection.actionText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = monthProjection.paceText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private data class MonthBudgetProjection(
+    val projectedExpenseCents: Long,
+    val statusText: String,
+    val paceText: String,
+    val actionText: String,
+    val statusColor: Color
+)
+
+private fun buildMonthBudgetProjection(
+    expense: Long,
+    budget: Long,
+    month: YearMonth,
+    today: LocalDate
+): MonthBudgetProjection? {
+    val currentMonth = YearMonth.now()
+    if (month != currentMonth || budget <= 0L || today.dayOfMonth <= 0) return null
+    val projected = (expense.toDouble() / today.dayOfMonth.toDouble() * month.lengthOfMonth()).toLong()
+    val overrun = projected - budget
+    val elapsedPercent = (today.dayOfMonth.toFloat() / month.lengthOfMonth().toFloat() * 100f).toInt()
+    val usedPercent = (expense.toFloat() / budget.toFloat() * 100f).toInt()
+    val paceText = "本月已过 $elapsedPercent%，预算已用 $usedPercent%。"
+    return when {
+        overrun > 0L -> MonthBudgetProjection(
+            projectedExpenseCents = projected,
+            statusText = "预计超 ${MoneyFormat.fromCents(overrun)}",
+            paceText = paceText,
+            actionText = "建议今天先压低可选消费，优先检查餐饮、购物、出行等高频分类。",
+            statusColor = DangerColor
+        )
+        projected >= budget * 0.9 -> MonthBudgetProjection(
+            projectedExpenseCents = projected,
+            statusText = "接近预算",
+            paceText = paceText,
+            actionText = "建议接下来几天按今日建议可支出执行，避免月底被动压缩。",
+            statusColor = WarningColor
+        )
+        else -> MonthBudgetProjection(
+            projectedExpenseCents = projected,
+            statusText = "节奏安全",
+            paceText = paceText,
+            actionText = "当前消费节奏可控，保持自动记账和每周复盘即可。",
+            statusColor = SuccessColor
         )
     }
 }

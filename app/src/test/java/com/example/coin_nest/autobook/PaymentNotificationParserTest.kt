@@ -48,5 +48,28 @@ class PaymentNotificationParserTest {
         )
         assertNull(parsed)
     }
-}
 
+    @Test
+    fun `ignore coupon success even when amount exists`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.eg.android.AlipayGphone",
+            title = "优惠券领取成功",
+            text = "优惠券到账，面额￥10.00，可用于下次支付",
+            postTime = 1_710_001_100_000
+        )
+
+        assertNull(parsed)
+    }
+
+    @Test
+    fun `ignore wealth management success even with payment keyword`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.eg.android.AlipayGphone",
+            title = "理财买入成功",
+            text = "支付成功，基金申购金额￥1200.00，确认份额以页面为准",
+            postTime = 1_710_001_200_000
+        )
+
+        assertNull(parsed)
+    }
+}

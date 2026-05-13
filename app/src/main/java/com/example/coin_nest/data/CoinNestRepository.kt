@@ -25,7 +25,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
-internal const val AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS = 25_000L
+internal const val AUTO_CHANNEL_WINDOW_DUPLICATE_MS = 60_000L
+internal const val AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS = 90_000L
+internal const val AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS = AUTO_CHANNEL_WINDOW_DUPLICATE_MS
 
 internal fun isWithinAutoSameSourceWindow(existingOccurredAt: Long, incomingOccurredAt: Long): Boolean {
     return kotlin.math.abs(existingOccurredAt - incomingOccurredAt) <= AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS
@@ -35,7 +37,7 @@ internal fun shouldDedupeByAutoChannel(existingChannel: String, incomingChannel:
     val e = existingChannel.uppercase()
     val i = incomingChannel.uppercase()
     if (e.isBlank() || i.isBlank()) return false
-    return e != i
+    return e in setOf("NOTIFY", "ACCESS") && i in setOf("NOTIFY", "ACCESS")
 }
 
 data class AutoTransactionInsertResult(
@@ -480,22 +482,18 @@ class CoinNestRepository(context: Context) {
         ) {
             return@withContext AutoTransactionInsertResult(
                 insertedId = null,
-                reason = "CROSS_CHANNEL_DUPLICATE_BY_WINDOW",
+                reason = "AUTO_DUPLICATE_BY_WINDOW",
                 shouldNotify = false
             )
         }
 
-        // Cross-source dedupe: link the secondary channel record as non-accounting duplicate.
-        val linkedAnchorId = if (channel.uppercase() == "NOTIFY") {
-            null
-        } else {
-            findCrossSourceAnchorId(
-                amountCents = amountCents,
-                type = autoType,
-                source = source,
-                occurredAtEpochMs = occurredAt
-            )
-        }
+        // Cross-source dedupe: payment apps and bank/card notices often describe the same payment.
+        val linkedAnchorId = findCrossSourceAnchorId(
+            amountCents = amountCents,
+            type = autoType,
+            source = source,
+            occurredAtEpochMs = occurredAt
+        )
         val finalStatus = if (linkedAnchorId != null) STATUS_LINKED_DUPLICATE else STATUS_PENDING
         val finalNote = if (linkedAnchorId != null) {
             "$note [跨源关联->#$linkedAnchorId]"
@@ -575,12 +573,9 @@ class CoinNestRepository(context: Context) {
         occurredAtEpochMs: Long
     ): Long? {
         val normalizedSource = source.uppercase()
-        if (normalizedSource !in setOf("BANK_CARD", "CREDIT_CARD", "UNIONPAY")) {
-            return null
-        }
-        val counterpartSources = setOf("ALIPAY", "WECHAT")
+        val counterpartSources = counterpartSourceSet(normalizedSource)
         if (counterpartSources.isEmpty()) return null
-        val windowMs = 90_000L
+        val windowMs = AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS
         val cursor = dbHelper.readableDatabase.rawQuery(
             """
             SELECT id, source
@@ -588,7 +583,6 @@ class CoinNestRepository(context: Context) {
             WHERE amount_cents = ?
               AND type = ?
               AND status IN (?, ?)
-              AND occurred_at_epoch_ms <= ?
               AND ABS(occurred_at_epoch_ms - ?) <= ?
             ORDER BY occurred_at_epoch_ms DESC
             LIMIT 30
@@ -598,7 +592,6 @@ class CoinNestRepository(context: Context) {
                 type,
                 STATUS_PENDING,
                 STATUS_CONFIRMED,
-                occurredAtEpochMs.toString(),
                 occurredAtEpochMs.toString(),
                 windowMs.toString()
             )
@@ -617,6 +610,7 @@ class CoinNestRepository(context: Context) {
     private fun counterpartSourceSet(source: String): Set<String> {
         return when (source.uppercase()) {
             "BANK_CARD", "CREDIT_CARD", "UNIONPAY" -> setOf("ALIPAY", "WECHAT")
+            "ALIPAY", "WECHAT" -> setOf("BANK_CARD", "CREDIT_CARD", "UNIONPAY")
             else -> emptySet()
         }
     }
@@ -650,7 +644,7 @@ class CoinNestRepository(context: Context) {
                 STATUS_CONFIRMED,
                 STATUS_LINKED_DUPLICATE,
                 occurredAtEpochMs.toString(),
-                AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS.toString()
+                AUTO_CHANNEL_WINDOW_DUPLICATE_MS.toString()
             )
         )
         return cursor.use { c ->

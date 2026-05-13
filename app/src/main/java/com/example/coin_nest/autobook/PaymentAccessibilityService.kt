@@ -2,6 +2,7 @@ package com.example.coin_nest.autobook
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -29,13 +30,14 @@ class PaymentAccessibilityService : AccessibilityService() {
         "支付成功", "付款成功", "交易成功", "已支付", "成功支付", "支付完成"
     )
     private val nonPaymentKeywords = listOf(
-        "余额宝", "基金", "理财", "申购", "赎回", "收益", "确认金额", "确认份额", "买入成功"
+        "余额宝", "基金", "理财", "申购", "赎回", "收益", "确认金额", "确认份额", "买入成功",
+        "卖出成功", "优惠券", "券包", "卡券", "红包", "积分", "分红", "净值", "持仓", "体验金"
     )
 
     // 防抖窗口：屏蔽同一页面短时间重复 Accessibility 回调
     private val rawSnapshotWindowMs = 2_500L
     // 页面级去重窗口：防止同一笔成功页在短时间内连续入库
-    private val logicalWindowMs = 10_000L
+    private val logicalWindowMs = 5 * 60_000L
     private val recentRawSnapshotMs = LinkedHashMap<String, Long>()
     private val recentLogicalKeyMs = LinkedHashMap<String, Long>()
 
@@ -174,9 +176,7 @@ class PaymentAccessibilityService : AccessibilityService() {
     }
 
     private fun looksLikeNonPayment(text: String): Boolean {
-        val nonPayment = nonPaymentKeywords.any { text.contains(it, ignoreCase = true) }
-        if (!nonPayment) return false
-        return successKeywords.none { text.contains(it, ignoreCase = true) }
+        return nonPaymentKeywords.any { text.contains(it, ignoreCase = true) }
     }
 
     private fun buildMergedContent(event: AccessibilityEvent, root: AccessibilityNodeInfo?): String {
@@ -214,13 +214,23 @@ class PaymentAccessibilityService : AccessibilityService() {
 
     private fun isDuplicateLogicalPayment(parsed: ParsedPayment, merged: String): Boolean {
         val now = System.currentTimeMillis()
-        val stableRef = parsed.transactionRef ?: parsed.fingerprint ?: merged.take(80)
+        val stableRef = parsed.transactionRef
+            ?: parsed.fingerprint
+            ?: buildStablePageSignature(merged)
         val key = "${parsed.source}|${parsed.type}|${parsed.amountCents}|$stableRef"
         pruneRecentMap(recentLogicalKeyMs, now, logicalWindowMs)
         val last = recentLogicalKeyMs[key]
         if (last != null && now - last <= logicalWindowMs) return true
         recentLogicalKeyMs[key] = now
         return false
+    }
+
+    private fun buildStablePageSignature(text: String): String {
+        return text
+            .replace(Regex("\\d{4}[-/.年]\\d{1,2}[-/.月]\\d{1,2}日?"), "")
+            .replace(Regex("\\d{1,2}:\\d{2}(:\\d{2})?"), "")
+            .replace(Regex("\\s+"), "")
+            .take(120)
     }
 
     private fun pruneRecentMap(target: LinkedHashMap<String, Long>, now: Long, windowMs: Long) {
@@ -232,6 +242,7 @@ class PaymentAccessibilityService : AccessibilityService() {
     }
 
     private fun debugPopup(message: String) {
+        if (!isDebuggable()) return
         val now = System.currentTimeMillis()
         if (now - lastToastMs < 1500L) return
         lastToastMs = now
@@ -240,5 +251,9 @@ class PaymentAccessibilityService : AccessibilityService() {
                 Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun isDebuggable(): Boolean {
+        return applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     }
 }

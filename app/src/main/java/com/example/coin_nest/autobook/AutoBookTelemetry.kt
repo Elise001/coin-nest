@@ -2,6 +2,15 @@ package com.example.coin_nest.autobook
 
 import android.content.Context
 import android.util.Log
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class AutoBookAuditEvent(
+    val event: String,
+    val reason: String,
+    val packageName: String,
+    val occurredAtEpochMs: Long
+)
 
 object AutoBookTelemetry {
     private const val TAG = "AutoBookTrace"
@@ -14,6 +23,8 @@ object AutoBookTelemetry {
     private const val KEY_LAST_NOTIFY_RECEIVED_MS = "last_notify_received_ms"
     private const val KEY_LAST_NOTIFY_PACKAGE = "last_notify_package"
     private const val KEY_LAST_NOTIFY_PREVIEW = "last_notify_preview"
+    private const val KEY_RECENT_EVENTS = "recent_events"
+    private const val MAX_RECENT_EVENTS = 8
 
     fun track(
         context: Context,
@@ -25,11 +36,20 @@ object AutoBookTelemetry {
         val safeReason = reason.orEmpty().take(180)
         val safePkg = packageName.orEmpty().take(120)
         Log.i(TAG, "event=$event pkg=$safePkg reason=$safeReason ts=$now")
-        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).edit().apply {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val recentEvents = appendRecentEvent(
+            existingJson = prefs.getString(KEY_RECENT_EVENTS, null),
+            event = event,
+            reason = safeReason,
+            packageName = safePkg,
+            occurredAtEpochMs = now
+        )
+        prefs.edit().apply {
             putString(KEY_LAST_EVENT, event)
             putString(KEY_LAST_REASON, safeReason)
             putString(KEY_LAST_PACKAGE, safePkg)
             putLong(KEY_LAST_EVENT_MS, now)
+            putString(KEY_RECENT_EVENTS, recentEvents.toString())
             if (event == "listener_connected") {
                 putLong(KEY_LAST_LISTENER_CONNECTED_MS, now)
             }
@@ -39,6 +59,28 @@ object AutoBookTelemetry {
                 putString(KEY_LAST_NOTIFY_PREVIEW, safeReason)
             }
         }.apply()
+    }
+
+    fun readRecentAuditEvents(context: Context): List<AutoBookAuditEvent> {
+        val raw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_RECENT_EVENTS, null)
+            ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    add(
+                        AutoBookAuditEvent(
+                            event = obj.optString("event"),
+                            reason = obj.optString("reason"),
+                            packageName = obj.optString("package"),
+                            occurredAtEpochMs = obj.optLong("ts")
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     fun readLastReason(context: Context): String? {
@@ -67,5 +109,28 @@ object AutoBookTelemetry {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .getString(KEY_LAST_NOTIFY_PREVIEW, null)
             ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun appendRecentEvent(
+        existingJson: String?,
+        event: String,
+        reason: String,
+        packageName: String,
+        occurredAtEpochMs: Long
+    ): JSONArray {
+        val newItem = JSONObject().apply {
+            put("event", event)
+            put("reason", reason)
+            put("package", packageName)
+            put("ts", occurredAtEpochMs)
+        }
+        val previous = runCatching { JSONArray(existingJson.orEmpty()) }.getOrNull() ?: JSONArray()
+        val output = JSONArray().put(newItem)
+        var index = 0
+        while (index < previous.length() && output.length() < MAX_RECENT_EVENTS) {
+            previous.optJSONObject(index)?.let { output.put(it) }
+            index++
+        }
+        return output
     }
 }

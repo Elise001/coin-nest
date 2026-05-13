@@ -62,6 +62,8 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.coin_nest.autobook.AutoBookAuditEvent
+import com.example.coin_nest.autobook.AutoBookTelemetry
 import com.example.coin_nest.util.MoneyFormat
 import java.math.BigDecimal
 import java.time.Instant
@@ -82,7 +84,9 @@ internal fun SettingsTab(
         replaceExisting: Boolean,
         onResult: (Int, Int) -> Unit,
         onError: (String) -> Unit
-    ) -> Unit
+    ) -> Unit,
+    openBudgetAtToken: Int = 0,
+    onBudgetJumpHandled: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val zoneId = remember { ZoneId.systemDefault() }
@@ -127,6 +131,14 @@ internal fun SettingsTab(
         }
     }
     val settingsNav = rememberNavController()
+    var lastHandledBudgetToken by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(openBudgetAtToken) {
+        if (openBudgetAtToken > lastHandledBudgetToken) {
+            settingsNav.navigate("budget") { launchSingleTop = true }
+            lastHandledBudgetToken = openBudgetAtToken
+            onBudgetJumpHandled()
+        }
+    }
     val exportJsonLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val json = pendingExportJson
         if (uri != null && !json.isNullOrBlank()) {
@@ -304,6 +316,18 @@ internal fun SettingsTab(
                             Spacer(modifier = Modifier.height(6.dp))
                             autoBookHealth.diagnostics.take(4).forEach { hint ->
                                 Text("• $hint", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            val recentAuditEvents = remember(autoBookHealthRefreshTick) {
+                                AutoBookTelemetry.readRecentAuditEvents(context)
+                            }
+                            if (recentAuditEvents.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("最近自动记账事件", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                recentAuditEvents.take(5).forEach { event ->
+                                    AutoBookAuditEventRow(event)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                }
                             }
                         }
                         Spacer(modifier = Modifier.height(10.dp))
@@ -873,6 +897,77 @@ private fun ProfileEntryCard(
             }
             Text(">", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+@Composable
+private fun AutoBookAuditEventRow(event: AutoBookAuditEvent) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f))
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                "${auditPackageLabel(event.packageName)} · ${auditEventLabel(event.event)}",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                formatEpoch(event.occurredAtEpochMs),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        val reason = auditReasonLabel(event.reason.ifBlank { event.event })
+        if (reason.isNotBlank()) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                reason,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun auditEventLabel(event: String): String {
+    return when (event) {
+        "notify_received" -> "收到通知"
+        "insert_success", "accessibility_insert_success" -> "已入队"
+        "insert_drop", "accessibility_insert_drop" -> "已过滤"
+        "parse_failed", "accessibility_parse_failed" -> "解析失败"
+        "accessibility_detected" -> "识别到页面"
+        "accessibility_drop" -> "页面去重"
+        "listener_connected" -> "监听已连接"
+        "accessibility_connected" -> "无障碍已连接"
+        else -> event
+    }
+}
+
+private fun auditReasonLabel(reason: String): String {
+    val upper = reason.uppercase()
+    return when {
+        upper.contains("AUTO_DUPLICATE_BY_WINDOW") -> "短时间重复，已忽略"
+        upper.contains("SAME_SOURCE_DUPLICATE_BY_TXN_REF") -> "同交易号重复，已忽略"
+        upper.contains("CROSS_SOURCE_LINKED") -> "跨渠道重复，已合并"
+        upper.contains("NON") || reason.contains("非支付") -> reason.take(32)
+        upper.contains("INSERTED") -> "进入待确认"
+        upper.contains("PARSE") || reason.contains("未提取") || reason.contains("无法判断") -> reason.take(32)
+        else -> reason.take(32)
+    }
+}
+
+private fun auditPackageLabel(packageName: String): String {
+    return when (packageName) {
+        "com.eg.android.AlipayGphone" -> "支付宝"
+        "com.tencent.mm" -> "微信"
+        "cmb.pb", "com.chinamworld.main", "com.icbc" -> "银行卡"
+        "com.unionpay" -> "云闪付"
+        "" -> "本机"
+        else -> packageName.take(16)
     }
 }
 

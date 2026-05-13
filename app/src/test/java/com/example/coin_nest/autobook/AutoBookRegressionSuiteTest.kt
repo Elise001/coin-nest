@@ -1,6 +1,8 @@
 package com.example.coin_nest.autobook
 
 import com.example.coin_nest.data.AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS
+import com.example.coin_nest.data.AUTO_CHANNEL_WINDOW_DUPLICATE_MS
+import com.example.coin_nest.data.AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS
 import com.example.coin_nest.data.isWithinAutoSameSourceWindow
 import com.example.coin_nest.data.shouldDedupeByAutoChannel
 import com.example.coin_nest.data.model.TransactionType
@@ -98,10 +100,18 @@ class AutoBookRegressionSuiteTest {
     }
 
     @Test
-    fun `channel dedupe should only work across notify and access`() {
+    fun `auto dedupe windows should separate channel and cross source tolerance`() {
+        assertEquals(60_000L, AUTO_CHANNEL_WINDOW_DUPLICATE_MS)
+        assertEquals(90_000L, AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS)
+        assertEquals(AUTO_CHANNEL_WINDOW_DUPLICATE_MS, AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS)
+    }
+
+    @Test
+    fun `channel dedupe should work across and within auto channels`() {
         assertTrue(shouldDedupeByAutoChannel("NOTIFY", "ACCESS"))
         assertTrue(shouldDedupeByAutoChannel("ACCESS", "NOTIFY"))
-        assertTrue(!shouldDedupeByAutoChannel("NOTIFY", "NOTIFY"))
-        assertTrue(!shouldDedupeByAutoChannel("ACCESS", "ACCESS"))
+        assertTrue(shouldDedupeByAutoChannel("NOTIFY", "NOTIFY"))
+        assertTrue(shouldDedupeByAutoChannel("ACCESS", "ACCESS"))
+        assertTrue(!shouldDedupeByAutoChannel("MANUAL", "ACCESS"))
     }
 }

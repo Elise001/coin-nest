@@ -1,7 +1,7 @@
 package com.example.coin_nest.autobook
 
 import com.example.coin_nest.data.model.TransactionType
-import kotlin.math.abs
+import com.example.coin_nest.util.MoneyParser
 
 private val amountRegex = Regex(
     "[+\\-−]?\\s*(?:[¥￥]|RMB|CNY)?\\s*\\d{1,7}(?:[\\.,]\\d{1,2})?",
@@ -38,7 +38,13 @@ private val accountContextKeywords = listOf(
     "尾号", "账号", "账户", "卡号", "末四位", "后四位", "邮箱", "手机号", "@", "***", "****"
 )
 private val nonPaymentKeywords = listOf(
-    "余额宝", "基金", "理财", "申购", "赎回", "确认成功通知", "确认金额", "收益", "分红", "净值", "持仓", "体验金"
+    "余额宝", "基金", "理财", "申购", "赎回", "确认成功通知", "确认金额", "确认份额", "收益", "分红", "净值", "持仓",
+    "体验金", "优惠券", "券包", "卡券", "红包", "积分", "买入成功", "卖出成功"
+)
+
+private val hardNonPaymentKeywords = listOf(
+    "余额宝", "基金", "理财", "申购", "赎回", "确认份额", "收益", "分红", "净值", "持仓",
+    "体验金", "优惠券", "券包", "卡券", "积分", "买入成功", "卖出成功"
 )
 
 private val expenseKeywords = listOf(
@@ -58,7 +64,7 @@ private val transferInKeywords = listOf(
 )
 
 private val noiseKeywords = listOf(
-    "验证码", "口令", "待支付", "广告", "活动", "优惠券", "账单助手", "积分",
+    "验证码", "口令", "待支付", "广告", "活动", "账单助手",
     "条新消息", "群聊", "内部群", "拍了拍", "@你", "语音通话", "视频通话"
 )
 
@@ -85,14 +91,14 @@ data class PaymentParseDebugResult(
 )
 
 private data class ParsedAmount(
-    val amount: Double,
+    val cents: Long,
     val hasMinusSign: Boolean
 )
 
 private data class AmountCandidate(
     val raw: String,
     val normalized: String,
-    val value: Double,
+    val cents: Long,
     val index: Int,
     val hasMinusSign: Boolean
 )
@@ -122,16 +128,16 @@ object PaymentNotificationParser {
         if (noiseKeywords.any { merged.contains(it, ignoreCase = true) }) {
             return PaymentParseDebugResult(null, "命中噪声关键词")
         }
-        if (!looksLikeTransaction(merged)) {
-            return PaymentParseDebugResult(null, "非支付交易通知")
-        }
         if (looksLikeNonPaymentConfirmation(merged)) {
             return PaymentParseDebugResult(null, "非支付确认类通知")
+        }
+        if (!looksLikeTransaction(merged)) {
+            return PaymentParseDebugResult(null, "非支付交易通知")
         }
 
         val amountMatch = extractAmount(merged)
             ?: return PaymentParseDebugResult(null, "未提取到有效金额")
-        val cents = (amountMatch.amount * 100).toLong()
+        val cents = amountMatch.cents
         if (cents <= 0 || cents > 20_000_000) {
             return PaymentParseDebugResult(null, "金额越界: $cents")
         }
@@ -162,12 +168,14 @@ object PaymentNotificationParser {
 }
 
 private fun looksLikeTransaction(merged: String): Boolean {
+    if (hardNonPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) return false
     if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) return true
     if (transactionKeywords.any { merged.contains(it, ignoreCase = true) }) return true
     return currencyAnchoredAmountRegex.containsMatchIn(merged)
 }
 
 private fun looksLikeNonPaymentConfirmation(merged: String): Boolean {
+    if (hardNonPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) return true
     val hitNonPayment = nonPaymentKeywords.any { merged.contains(it, ignoreCase = true) }
     if (!hitNonPayment) return false
     return strongPaymentKeywords.none { merged.contains(it, ignoreCase = true) }
@@ -240,7 +248,7 @@ private fun extractAmount(merged: String): ParsedAmount? {
         val raw = match.groupValues.getOrNull(1).orEmpty()
         val parsed = parseRawAmount(raw) ?: return@forEach
         if (!isLikelyAccountNumber(merged, raw, match.range.first)) {
-            return ParsedAmount(parsed.amount, parsed.hasMinusSign)
+            return ParsedAmount(parsed.cents, parsed.hasMinusSign)
         }
     }
 
@@ -251,7 +259,7 @@ private fun extractAmount(merged: String): ParsedAmount? {
         AmountCandidate(
             raw = raw,
             normalized = parsed.normalized,
-            value = parsed.amount,
+            cents = parsed.cents,
             index = match.range.first,
             hasMinusSign = parsed.hasMinusSign
         )
@@ -260,11 +268,11 @@ private fun extractAmount(merged: String): ParsedAmount? {
 
     val best = candidates.maxByOrNull { scoreAmountCandidate(merged, it) } ?: return null
     if (scoreAmountCandidate(merged, best) <= 0) return null
-    return ParsedAmount(best.value, best.hasMinusSign)
+    return ParsedAmount(best.cents, best.hasMinusSign)
 }
 
 private data class ParsedRawAmount(
-    val amount: Double,
+    val cents: Long,
     val hasMinusSign: Boolean,
     val normalized: String
 )
@@ -278,9 +286,9 @@ private fun parseRawAmount(raw: String): ParsedRawAmount? {
         .replace("−", "-")
         .replace(",", ".")
         .replace(" ", "")
-    val amount = normalized.toDoubleOrNull() ?: return null
+    val cents = MoneyParser.parseYuanToCents(normalized.removePrefix("-")) ?: return null
     return ParsedRawAmount(
-        amount = abs(amount),
+        cents = cents,
         hasMinusSign = normalized.startsWith("-"),
         normalized = normalized
     )
@@ -299,7 +307,7 @@ private fun scoreAmountCandidate(merged: String, candidate: AmountCandidate): In
     if (amountContextKeywords.any { context.contains(it, ignoreCase = true) }) score += 5
     if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) score += 2
     if (isLikelyAccountNumber(merged, candidate.raw, candidate.index)) score -= 12
-    if (candidate.value >= 10_000 && !hasDecimal) score -= 2
+    if (candidate.cents >= 1_000_000 && !hasDecimal) score -= 2
     return score
 }
 
@@ -340,4 +348,3 @@ private fun buildSameSourceFingerprint(source: String, transactionRef: String?):
     val ref = transactionRef?.trim()?.takeIf { it.length >= 6 } ?: return null
     return "SRC_TXN_${source}_${ref.uppercase()}"
 }
-

@@ -11,6 +11,7 @@ import com.example.coin_nest.data.model.CategoryItem
 import com.example.coin_nest.data.model.TransactionInput
 import com.example.coin_nest.data.model.TransactionType
 import com.example.coin_nest.util.DateRangeUtils
+import com.example.coin_nest.util.MoneyParser
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -401,12 +402,11 @@ class CoinNestViewModel(
         note: String,
         occurredAtEpochMs: Long = System.currentTimeMillis()
     ) {
-        val amount = amountYuan.toDoubleOrNull() ?: return
-        if (amount <= 0.0) return
+        val amountCents = MoneyParser.parseYuanToCents(amountYuan) ?: return
         viewModelScope.launch {
             repository.addTransaction(
                 TransactionInput(
-                    amountCents = (amount * 100).toLong(),
+                    amountCents = amountCents,
                     type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
                     parentCategory = parentCategory.ifBlank { if (isIncome) "\u6536\u5165" else "\u751f\u6d3b" },
                     childCategory = childCategory.ifBlank { if (isIncome) "\u5176\u4ed6" else "\u672a\u5206\u7c7b" },
@@ -424,23 +424,21 @@ class CoinNestViewModel(
     }
 
     fun setCurrentMonthBudget(amountYuan: String) {
-        val amount = amountYuan.toDoubleOrNull() ?: return
-        if (amount <= 0.0) return
+        val amountCents = MoneyParser.parseYuanToCents(amountYuan) ?: return
         viewModelScope.launch {
-            repository.upsertMonthBudget(monthKey, (amount * 100).toLong())
+            repository.upsertMonthBudget(monthKey, amountCents)
         }
     }
 
     fun setSelectedMonthCategoryBudget(parentCategory: String, childCategory: String, amountYuan: String) {
-        val amount = amountYuan.toDoubleOrNull() ?: return
-        if (amount <= 0.0) return
+        val amountCents = MoneyParser.parseYuanToCents(amountYuan) ?: return
         val targetMonthKey = DateRangeUtils.monthKey(selectedMonthFlow.value)
         viewModelScope.launch {
             repository.upsertCategoryBudget(
                 monthKey = targetMonthKey,
                 parentCategory = parentCategory,
                 childCategory = childCategory,
-                limitCents = (amount * 100).toLong()
+                limitCents = amountCents
             )
         }
     }
@@ -492,7 +490,7 @@ class CoinNestViewModel(
         viewModelScope.launch {
             runCatching { repository.exportBackupJson() }
                 .onSuccess(onResult)
-                .onFailure { onError(it.message ?: "瀵煎嚭澶辫触") }
+                .onFailure { onError(it.message ?: "\u5bfc\u51fa\u5931\u8d25") }
         }
     }
 
@@ -505,7 +503,7 @@ class CoinNestViewModel(
         viewModelScope.launch {
             runCatching { repository.importBackupJson(json, replaceExisting) }
                 .onSuccess { (txCount, catCount) -> onResult(txCount, catCount) }
-                .onFailure { onError(it.message ?: "瀵煎叆澶辫触") }
+                .onFailure { onError(it.message ?: "\u5bfc\u5165\u5931\u8d25") }
         }
     }
 
