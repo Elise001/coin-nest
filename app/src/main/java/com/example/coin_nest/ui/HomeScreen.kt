@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -87,13 +86,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.coin_nest.data.db.TransactionEntity
+import com.example.coin_nest.ui.theme.Amber700
+import com.example.coin_nest.ui.theme.Coral400
+import com.example.coin_nest.ui.theme.Coral500
+import com.example.coin_nest.ui.theme.Ink
+import com.example.coin_nest.ui.theme.Mint500
+import com.example.coin_nest.ui.theme.Peach100
+import com.example.coin_nest.ui.theme.Sky200
+import com.example.coin_nest.ui.theme.Sky500
+import com.example.coin_nest.ui.theme.Sky700
 import com.example.coin_nest.util.MoneyFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
-internal val SuccessColor = Color(0xFF2E7D32)
-internal val DangerColor = Color(0xFFB23A30)
-internal val WarningColor = Color(0xFFD8894A)
+internal val SuccessColor = Mint500
+internal val DangerColor = Coral500
+internal val WarningColor = Amber700
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -135,19 +143,11 @@ fun HomeScreen(
             .fillMaxSize()
             .background(pageBackground)
     ) {
-        Text(
-            text = "Coin Nest",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+        AppHeader(
+            selectedTab = mainTabs[selectedMainTab],
+            selectedMonth = state.selectedMonth,
+            balance = state.selectedMonthSummary.balanceCents
         )
-        Text(
-            text = "个人记账与预算",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-        Spacer(modifier = Modifier.height(6.dp))
 
         Box(modifier = Modifier.weight(1f)) {
             AnimatedContent(
@@ -213,22 +213,22 @@ private fun BottomMainTabs(
     selectedIndex: Int,
     onSelect: (Int) -> Unit
 ) {
-    val tabSelectedColor = MaterialTheme.colorScheme.primary
+    val tabSelectedColor = Sky700
     val tabUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val tabActiveBgColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-    val tabActiveStrokeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.26f)
+    val tabActiveBgColor = Sky200
+    val tabActiveStrokeColor = Sky500.copy(alpha = 0.42f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.98f))
+            .background(MaterialTheme.colorScheme.surface)
             .navigationBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 5.dp)
+            .padding(horizontal = 10.dp, vertical = 7.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
                 .align(Alignment.TopStart)
         )
 
@@ -254,19 +254,19 @@ private fun BottomMainTabs(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(62.dp)
-                        .padding(horizontal = 3.dp)
+                        .height(58.dp)
+                        .padding(horizontal = 4.dp)
                         .graphicsLayer {
                             scaleX = scale
                             scaleY = scale
                             this.alpha = alpha
                         }
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (selected) tabActiveBgColor else Color.Transparent)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (selected) tabActiveBgColor else MaterialTheme.colorScheme.surface)
                         .border(
                             width = 1.dp,
-                            color = if (selected) tabActiveStrokeColor else Color.Transparent,
-                            shape = RoundedCornerShape(16.dp)
+                            color = if (selected) tabActiveStrokeColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(14.dp)
                         )
                         .semantics {
                             role = Role.Tab
@@ -283,16 +283,16 @@ private fun BottomMainTabs(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .width(22.dp)
-                            .height(2.dp)
+                            .height(3.dp)
                             .clip(RoundedCornerShape(999.dp))
-                            .background(if (selected) tabSelectedColor.copy(alpha = 0.62f) else Color.Transparent)
+                            .background(if (selected) Sky500 else Color.Transparent)
                     )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             imageVector = tabIcon(tab),
                             contentDescription = tab.title,
                             modifier = Modifier.size(22.dp),
-                            tint = if (selected) tabSelectedColor else tabUnselectedColor.copy(alpha = 0.85f)
+                            tint = if (selected) tabSelectedColor else tabUnselectedColor
                         )
                         Spacer(modifier = Modifier.height(3.dp))
                         Box(
@@ -301,7 +301,7 @@ private fun BottomMainTabs(
                         ) {
                             Text(
                                 text = tab.title,
-                                color = if (selected) tabSelectedColor else tabUnselectedColor.copy(alpha = 0.9f),
+                                color = if (selected) tabSelectedColor else tabUnselectedColor,
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                 style = MaterialTheme.typography.labelSmall,
                                 textAlign = TextAlign.Center,
@@ -415,6 +415,63 @@ private fun HomeDashboardTab(
 }
 
 @Composable
+private fun AppHeader(
+    selectedTab: MainTab,
+    selectedMonth: YearMonth,
+    balance: Long
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)
+    ) {
+        Text(
+            text = when (selectedTab) {
+                MainTab.Home -> "Coin Nest"
+                MainTab.Record -> "记一笔"
+                MainTab.Insight -> "钱去哪了"
+                MainTab.Profile -> "我的财务设置"
+            },
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = when (selectedTab) {
+                    MainTab.Home -> "先看余额，再决定要不要花"
+                    MainTab.Record -> "少填一点，系统多想一点"
+                    MainTab.Insight -> "只看重点，不看噪音"
+                    MainTab.Profile -> "权限、预算、数据都在这里"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.34f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "${selectedMonth.monthValue}月 ${MoneyFormat.fromCents(balance)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun MoneyHeroCard(
     month: YearMonth,
     income: Long,
@@ -431,16 +488,12 @@ private fun MoneyHeroCard(
         0f
     }.coerceIn(0f, 1.2f)
     val leftBudget = budget?.let { (it - expense).coerceAtLeast(0L) }
-    val balanceColor = when {
-        balance > 0L -> SuccessColor
-        balance < 0L -> DangerColor
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-
+    val heroTextColor = Ink
+    val heroSubtleColor = MaterialTheme.colorScheme.onSurfaceVariant
     Card(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Sky200),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -454,14 +507,14 @@ private fun MoneyHeroCard(
                     Box(
                         modifier = Modifier
                             .size(38.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)),
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.72f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Filled.AccountBalanceWallet,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            tint = Sky700,
                             modifier = Modifier.size(21.dp)
                         )
                     }
@@ -470,18 +523,18 @@ private fun MoneyHeroCard(
                         Text(
                             text = "${month.monthValue}月钱包",
                             style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            fontWeight = FontWeight.Medium,
+                            color = heroTextColor
                         )
                         Text(
                             text = if (pendingCount > 0) "待确认 $pendingCount 条" else "自动记账已同步",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.76f)
+                            color = heroSubtleColor
                         )
                     }
                 }
                 TextButton(onClick = onOpenCalendar, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) {
-                    Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
+                    Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Sky700)
                 }
             }
 
@@ -489,13 +542,13 @@ private fun MoneyHeroCard(
                 Text(
                     text = "本月结余",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
+                    color = heroSubtleColor
                 )
                 Text(
                     text = MoneyFormat.fromCents(balance),
                     style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    color = heroTextColor,
                     fontFamily = FontFamily.Monospace
                 )
             }
@@ -503,14 +556,14 @@ private fun MoneyHeroCard(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MoneyHeroMetric("收入", MoneyFormat.fromCents(income), SuccessColor, Modifier.weight(1f))
                 MoneyHeroMetric("支出", MoneyFormat.fromCents(expense), DangerColor, Modifier.weight(1f))
-                MoneyHeroMetric("净值", MoneyFormat.fromCents(balance), balanceColor, Modifier.weight(1f))
+                MoneyHeroMetric("净值", MoneyFormat.fromCents(balance), heroTextColor, Modifier.weight(1f))
             }
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.11f))
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = 0.72f))
                     .padding(10.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -518,12 +571,12 @@ private fun MoneyHeroCard(
                         Text(
                             text = budget?.let { "预算剩余 ${MoneyFormat.fromCents(leftBudget ?: 0L)}" } ?: "还没设本月预算",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = heroTextColor
                         )
                         Text(
                             text = budget?.let { "${(budgetRatio * 100).toInt()}%" } ?: "去我的页设置",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
+                            color = heroSubtleColor
                         )
                     }
                     Box(
@@ -531,14 +584,14 @@ private fun MoneyHeroCard(
                             .fillMaxWidth()
                             .height(7.dp)
                             .clip(RoundedCornerShape(999.dp))
-                            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f))
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.24f))
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth(if (budget == null) 0.18f else budgetRatio.coerceIn(0.04f, 1f))
                                 .height(7.dp)
                                 .clip(RoundedCornerShape(999.dp))
-                                .background(if (budgetRatio >= 0.9f) WarningColor else MaterialTheme.colorScheme.secondary)
+                                .background(if (budgetRatio >= 0.9f) Coral400 else Sky500)
                         )
                     }
                 }
@@ -548,10 +601,10 @@ private fun MoneyHeroCard(
                 Button(
                     onClick = onRecord,
                     modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
-                    shape = RoundedCornerShape(13.dp),
+                    shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary
+                        containerColor = Sky700,
+                        contentColor = Color.White
                     )
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -561,10 +614,10 @@ private fun MoneyHeroCard(
                 OutlinedButton(
                     onClick = onOpenCalendar,
                     modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
-                    shape = RoundedCornerShape(13.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.35f)),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Sky500.copy(alpha = 0.42f)),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onPrimary
+                        contentColor = Sky700
                     )
                 ) {
                     Icon(Icons.Filled.Insights, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -580,17 +633,17 @@ private fun MoneyHeroCard(
 private fun MoneyHeroMetric(label: String, value: String, accent: Color, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f))
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.76f))
             .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             value,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             color = accent,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
@@ -685,8 +738,8 @@ private fun SummaryCard(
 ) {
     val bg = if (highlight) MaterialTheme.colorScheme.secondary.copy(alpha = 0.33f) else MaterialTheme.colorScheme.surface
     val balanceColor = when {
-        balance > 0L -> Color(0xFF2E7D32)
-        balance < 0L -> Color(0xFFB23A30)
+        balance > 0L -> SuccessColor
+        balance < 0L -> DangerColor
         else -> MaterialTheme.colorScheme.onSurface
     }
     val clickable = onClick != null
@@ -1289,7 +1342,7 @@ internal fun PrimaryActionButton(
         interactionSource = interactionSource,
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor,
-            contentColor = Color.White
+            contentColor = MaterialTheme.colorScheme.onPrimary
         )
     ) {
         Text(text, fontWeight = FontWeight.SemiBold)
@@ -1308,20 +1361,20 @@ internal fun GlassCard(
 ) {
     val container = when (tone) {
         GlassCardTone.Neutral -> MaterialTheme.colorScheme.surface
-        GlassCardTone.Warning -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.22f)
+        GlassCardTone.Warning -> Peach100
     }
     val border = when (tone) {
-        GlassCardTone.Neutral -> MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-        GlassCardTone.Warning -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f)
+        GlassCardTone.Neutral -> MaterialTheme.colorScheme.outline.copy(alpha = 0.26f)
+        GlassCardTone.Warning -> Coral400.copy(alpha = 0.56f)
     }
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, border),
         colors = CardDefaults.cardColors(containerColor = container),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(14.dp), content = content)
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), content = content)
     }
 }
 

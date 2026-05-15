@@ -7,38 +7,38 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Mint200,
+    primary = Frost200,
     onPrimary = Ink,
-    secondary = Amber500,
+    secondary = Peach300,
     onSecondary = Ink,
-    tertiary = Orange500,
+    tertiary = Mint500,
     onTertiary = Snow,
-    background = Color(0xFF101820),
-    onBackground = Color(0xFFE8F0EF),
-    surface = Color(0xFF18242D),
-    onSurface = Color(0xFFE8F0EF),
-    surfaceVariant = Color(0xFF253947),
-    onSurfaceVariant = Color(0xFFC2CED2),
-    outline = Color(0xFF586B76),
+    background = Color(0xFF111827),
+    onBackground = Color(0xFFF8FBFF),
+    surface = Color(0xFF182033),
+    onSurface = Color(0xFFF8FBFF),
+    surfaceVariant = Color(0xFF263149),
+    onSurfaceVariant = Color(0xFFD8DFEA),
+    outline = Color(0xFF6F7C91),
     error = Color(0xFFFFB4AB),
     onError = Color(0xFF690005)
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Teal700,
+    primary = Sky700,
     onPrimary = Snow,
-    secondary = Mint200,
-    onSecondary = Navy800,
-    tertiary = Amber500,
-    onTertiary = Ink,
+    secondary = Peach300,
+    onSecondary = Ink,
+    tertiary = Mint500,
+    onTertiary = Snow,
     background = Cloud50,
     onBackground = Ink,
     surface = Color.White,
     onSurface = Ink,
     surfaceVariant = Mist100,
     onSurfaceVariant = Slate600,
-    outline = Color(0xFFB8C5C2),
-    error = Color(0xFFB3261E),
+    outline = Color(0xFFCBD5E1),
+    error = Coral500,
     onError = Color.White
 )
 

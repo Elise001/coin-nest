@@ -147,12 +147,16 @@ internal fun InsightTab(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item { InsightModeSelector(mode = mode, onModeChange = { mode = it }) }
-                item { InsightSummaryCard(title = summary.title, detail = summary.detail, nudge = summary.nudge) }
                 item {
-                    InsightMetricStrip(
+                    InsightCommandCard(
+                        mode = mode,
+                        title = summary.title,
+                        detail = summary.detail,
+                        nudge = summary.nudge,
                         income = state.selectedMonthSummary.incomeCents,
                         expense = state.selectedMonthSummary.expenseCents,
-                        balance = state.selectedMonthSummary.balanceCents
+                        balance = state.selectedMonthSummary.balanceCents,
+                        anomalyCount = anomalies.size
                     )
                 }
                 item {
@@ -462,6 +466,95 @@ internal fun InsightTab(
 
 private data class InsightSummary(val title: String, val detail: String, val nudge: String)
 
+@Composable
+private fun InsightCommandCard(
+    mode: OverviewTabMode,
+    title: String,
+    detail: String,
+    nudge: String,
+    income: Long,
+    expense: Long,
+    balance: Long,
+    anomalyCount: Int
+) {
+    GlassCard {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary)
+                .padding(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${mode.title}度指挥台",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.86f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (anomalyCount > 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = if (anomalyCount > 0) "$anomalyCount 条异常" else "无异常",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (anomalyCount > 0) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = nudge,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f)
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MetricOnDark("收入", MoneyFormat.fromCents(income), Modifier.weight(1f))
+                    MetricOnDark("支出", MoneyFormat.fromCents(expense), Modifier.weight(1f))
+                    MetricOnDark("结余", MoneyFormat.fromCents(balance), Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricOnDark(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.13f))
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f), fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+    }
+}
+
 private fun buildInsightSummary(
     currentExpenseCents: Long,
     previousExpenseCents: Long,
@@ -490,7 +583,12 @@ private fun buildInsightSummary(
 @Composable
 private fun InsightModeSelector(mode: OverviewTabMode, onModeChange: (OverviewTabMode) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surface).padding(4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.24f), RoundedCornerShape(10.dp))
+            .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         OverviewTabMode.entries.forEach { item ->
@@ -498,14 +596,18 @@ private fun InsightModeSelector(mode: OverviewTabMode, onModeChange: (OverviewTa
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
-                    .border(1.dp, if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                    .border(1.dp, if (selected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
                     .clickable { onModeChange(item) }
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(item.title, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                Text(
+                    item.title,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

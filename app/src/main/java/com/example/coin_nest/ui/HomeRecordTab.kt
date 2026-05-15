@@ -176,35 +176,18 @@ internal fun RecordTab(
         }
 
         item {
-            GlassCard {
-                SectionTitle(title = "记账状态", subtitle = "先看节奏，再补记录")
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    MetricPill(
-                        label = "今日支出",
-                        value = MoneyFormat.fromCents(state.daily.expenseCents),
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricPill(
-                        label = "本月支出",
-                        value = MoneyFormat.fromCents(state.selectedMonthSummary.expenseCents),
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricPill(
-                        label = "待确认",
-                        value = "${state.pendingAutoTransactions.size}条",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
+            RecordMomentumCard(
+                todayExpense = state.daily.expenseCents,
+                monthExpense = state.selectedMonthSummary.expenseCents,
+                pendingCount = state.pendingAutoTransactions.size,
+                isIncome = isIncome,
+                amount = amount
+            )
         }
 
         item {
             GlassCard {
-                SectionTitle(title = "快速记账", subtitle = "先选类型与金额，再确认分类")
+                SectionTitle(title = "快速记账", subtitle = "金额优先，备注延后，减少一次性输入压力")
                 Spacer(modifier = Modifier.height(10.dp))
 
                 SegmentedSelector(
@@ -213,7 +196,7 @@ internal fun RecordTab(
                     onSelect = { index -> isIncome = index == 1 }
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 SectionTitle(
                     title = "快捷填充",
                     subtitle = if (quickFillMode == QuickFillMode.FULL_TEMPLATE) {
@@ -237,7 +220,8 @@ internal fun RecordTab(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     Text(
@@ -298,7 +282,7 @@ internal fun RecordTab(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 SectionTitle(title = "快捷金额")
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
@@ -694,6 +678,80 @@ private fun pendingDuplicateSourceGroup(source: String): String {
 }
 
 @Composable
+private fun RecordMomentumCard(
+    todayExpense: Long,
+    monthExpense: Long,
+    pendingCount: Int,
+    isIncome: Boolean,
+    amount: String
+) {
+    val parsed = remember(amount) { MoneyParser.parseYuanToCents(amount) }
+    GlassCard {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary)
+                .padding(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = if (isIncome) "正在记录收入" else "正在记录支出",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Text(
+                            text = parsed?.let { "当前金额 ${MoneyFormat.fromCents(it)}" } ?: "先点快捷金额，或直接输入",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.secondary)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = if (pendingCount > 0) "待确认 $pendingCount" else "无待办",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondary
+                        )
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RecordHeroMetric("今日支出", MoneyFormat.fromCents(todayExpense), Modifier.weight(1f))
+                    RecordHeroMetric("本月支出", MoneyFormat.fromCents(monthExpense), Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordHeroMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.13f))
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f), fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+    }
+}
+
+@Composable
 private fun SegmentedSelector(
     options: List<String>,
     selectedIndex: Int,
@@ -702,8 +760,9 @@ private fun SegmentedSelector(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f), RoundedCornerShape(10.dp))
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -712,13 +771,13 @@ private fun SegmentedSelector(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(8.dp))
                     .heightIn(min = 44.dp)
-                    .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
+                    .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
                     .border(
                         width = 1.dp,
-                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-                        shape = RoundedCornerShape(10.dp)
+                        color = if (selected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.22f),
+                        shape = RoundedCornerShape(8.dp)
                     )
                     .semantics {
                         role = Role.Tab
@@ -730,8 +789,8 @@ private fun SegmentedSelector(
             ) {
                 Text(
                     text = text,
-                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold
+                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
@@ -749,13 +808,13 @@ private fun QuickActionChip(
             .clip(RoundedCornerShape(999.dp))
             .defaultMinSize(minHeight = 44.dp)
             .background(
-                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                if (selected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surface
             )
             .border(
                 1.dp,
-                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                else MaterialTheme.colorScheme.outline.copy(alpha = 0.28f),
+                if (selected) MaterialTheme.colorScheme.secondary
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.34f),
                 RoundedCornerShape(999.dp)
             )
             .semantics {
@@ -769,8 +828,8 @@ private fun QuickActionChip(
             text = label,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
         )
     }
 }

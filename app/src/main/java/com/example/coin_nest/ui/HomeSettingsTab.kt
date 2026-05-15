@@ -235,36 +235,13 @@ internal fun SettingsTab(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
-                    GlassCard {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { settingsNav.navigate("profile_detail") },
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(52.dp)
-                                        .height(52.dp)
-                                        .clip(RoundedCornerShape(999.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text("zh", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                                    Text("已记账${state.retentionFeedback.activeDaysInSelectedMonth}天", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                MetricPill(label = "自动记账", value = if (autoBookHealth.healthy) "可用" else "待修复", modifier = Modifier.weight(1f))
-                                MetricPill(label = "预算", value = state.monthBudgetCents?.let { MoneyFormat.fromCents(it) } ?: "未设置", modifier = Modifier.weight(1f))
-                                MetricPill(label = "学习规则", value = "${state.smartLearningStatus.totalRules}条", modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
+                    ProfileControlHero(
+                        autoBookHealthy = autoBookHealth.healthy,
+                        budgetText = state.monthBudgetCents?.let { MoneyFormat.fromCents(it) } ?: "未设置",
+                        activeDays = state.retentionFeedback.activeDaysInSelectedMonth,
+                        rules = state.smartLearningStatus.totalRules,
+                        onOpenProfile = { settingsNav.navigate("profile_detail") }
+                    )
                 }
                 item {
                     GlassCard {
@@ -764,6 +741,67 @@ private data class ProfileNavEntry(
 )
 
 @Composable
+private fun ProfileControlHero(
+    autoBookHealthy: Boolean,
+    budgetText: String,
+    activeDays: Int,
+    rules: Int,
+    onOpenProfile: () -> Unit
+) {
+    GlassCard {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary)
+                .clickable { onOpenProfile() }
+                .padding(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .width(52.dp)
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("zh", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("账户控制台", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+                        Text("本月已记账 $activeDays 天 · 点此查看账户", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f))
+                    }
+                    Text("›", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProfileHeroMetric("自动记账", if (autoBookHealthy) "可用" else "待修复", Modifier.weight(1f))
+                    ProfileHeroMetric("预算", budgetText, Modifier.weight(1f))
+                    ProfileHeroMetric("规则", "${rules}条", Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileHeroMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.13f))
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f), fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
 private fun AutoBookStatusPill(statusText: String, healthy: Boolean) {
     val bg = if (healthy) SuccessColor.copy(alpha = 0.12f) else DangerColor.copy(alpha = 0.12f)
     val border = if (healthy) SuccessColor.copy(alpha = 0.35f) else DangerColor.copy(alpha = 0.35f)
@@ -872,9 +910,9 @@ private fun ProfileEntryCard(
     onClick: () -> Unit
 ) {
     Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.24f)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.26f)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
@@ -887,16 +925,16 @@ private fun ProfileEntryCard(
             Box(
                 modifier = Modifier
                     .width(4.dp)
-                    .height(28.dp)
+                    .height(34.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+                    .background(MaterialTheme.colorScheme.primary)
             )
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), fontWeight = FontWeight.SemiBold)
+            Text("›", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
         }
     }
 }
