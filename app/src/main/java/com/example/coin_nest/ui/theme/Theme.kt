@@ -45,7 +45,6 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun CoinnestTheme(
     darkTheme: Boolean = false,
-    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme

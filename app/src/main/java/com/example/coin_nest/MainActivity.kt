@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
                         onAddTransaction = viewModel::addTransaction,
                         onConfirmPendingAuto = viewModel::confirmPendingAutoTransaction,
                         onIgnorePendingAuto = viewModel::ignorePendingAutoTransaction,
-                        onUpdateTransactionCategory = viewModel::updateTransactionCategory,
+                        onUpdateTransactionDetails = viewModel::updateTransactionDetails,
                         onDeleteTransaction = viewModel::deleteTransaction,
                         onLoadMoreMonthTransactions = viewModel::loadMoreSelectedMonthTransactions,
                         onLoadMoreYearTransactions = viewModel::loadMoreSelectedYearTransactions,

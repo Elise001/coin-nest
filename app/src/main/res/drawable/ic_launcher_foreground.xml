@@ -1,6 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:gravity="center"
-        android:drawable="@drawable/ic_launcher_foreground_art" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,25 H72 C80.8,25 88,32.2 88,41 V67 C88,75.8 80.8,83 72,83 H36 C27.2,83 20,75.8 20,67 V41 C20,32.2 27.2,25 36,25 Z" />
+
+    <path
+        android:fillColor="#EEF5FF"
+        android:pathData="M36,31 H68 C74.6,31 80,36.4 80,43 V65 C80,71.6 74.6,77 68,77 H36 C29.4,77 24,71.6 24,65 V43 C24,36.4 29.4,31 36,31 Z" />
+
+    <path
+        android:fillColor="#1F4DB8"
+        android:pathData="M38,39 H62 C66.4,39 70,42.6 70,47 V63 C70,67.4 66.4,71 62,71 H38 C33.6,71 30,67.4 30,63 V47 C30,42.6 33.6,39 38,39 Z" />
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M43,45 H65 C68.9,45 72,48.1 72,52 V65 H43 C39.1,65 36,61.9 36,58 V52 C36,48.1 39.1,45 43,45 Z" />
+
+    <path
+        android:fillColor="#3772FF"
+        android:pathData="M62,51 H78 C80.8,51 83,53.2 83,56 V63 C83,65.8 80.8,68 78,68 H62 C58.6,68 56,65.4 56,62 V57 C56,53.6 58.6,51 62,51 Z" />
+
+    <path
+        android:fillColor="#FFB7A8"
+        android:pathData="M68,56 A4,4 0,1 0,68 64 A4,4 0,1 0,68 56" />
+
+    <path
+        android:fillColor="#008F86"
+        android:pathData="M35,35 A4,4 0,1 0,35 43 A4,4 0,1 0,35 35" />
+
+    <path
+        android:fillColor="#FFB7A8"
+        android:pathData="M75,33 A5,5 0,1 0,75 43 A5,5 0,1 0,75 33" />
+</vector>

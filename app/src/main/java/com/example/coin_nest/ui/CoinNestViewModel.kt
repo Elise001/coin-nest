@@ -472,10 +472,10 @@ class CoinNestViewModel(
         }
     }
 
-    fun updateTransactionCategory(id: Long, parentCategory: String, childCategory: String) {
+    fun updateTransactionDetails(id: Long, parentCategory: String, childCategory: String, note: String) {
         if (id <= 0L) return
         viewModelScope.launch {
-            repository.updateTransactionCategory(id, parentCategory, childCategory)
+            repository.updateTransactionDetails(id, parentCategory, childCategory, note)
         }
     }
 

@@ -2,7 +2,6 @@ package com.example.coin_nest.autobook
 
 import android.content.ComponentName
 import android.app.Notification
-import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
@@ -19,7 +18,7 @@ import kotlinx.coroutines.launch
 class PaymentNotificationListener : NotificationListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var lastPopupMs: Long = 0L
+    private var lastAutoHintMs: Long = 0L
 
     // Layer 1: whitelist + ignore self app notifications.
     private val allowedPackages = setOf(
@@ -99,6 +98,7 @@ class PaymentNotificationListener : NotificationListenerService() {
                             packageName = packageName,
                             reason = insertResult.reason
                         )
+                        showAutoDetectedToast()
                         debugPopup("AUTOBOOK_OK: ${parsed.source} ${parsed.amountCents / 100.0}")
                         PaymentActionNotifier.notifyPendingPayment(
                             context = applicationContext,
@@ -171,20 +171,17 @@ class PaymentNotificationListener : NotificationListenerService() {
 
     private fun debugPopup(msg: String) {
         Log.d("AutoBookDebug", msg)
-        if (!isDebuggable()) return
-        val now = System.currentTimeMillis()
-        if (now - lastPopupMs < 500) return
-        lastPopupMs = now
-        val display = mapDebugMessageToChinese(msg)
-        mainHandler.post {
-            runCatching {
-                Toast.makeText(applicationContext, display.take(80), Toast.LENGTH_LONG).show()
-            }
-        }
     }
 
-    private fun isDebuggable(): Boolean {
-        return applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+    private fun showAutoDetectedToast() {
+        val now = System.currentTimeMillis()
+        if (now - lastAutoHintMs < 1500L) return
+        lastAutoHintMs = now
+        mainHandler.post {
+            runCatching {
+                Toast.makeText(applicationContext, "自动记账已识别，已放入待确认", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun mapDebugMessageToChinese(raw: String): String {

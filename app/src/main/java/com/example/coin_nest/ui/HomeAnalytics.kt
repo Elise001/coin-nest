@@ -88,49 +88,6 @@ internal fun buildXAxisMarkers(points: List<TrendPoint>): List<AxisMarker> {
     return indexes.map { idx -> AxisMarker(points[idx].label, points[idx].expenseCents) }
 }
 
-internal fun reportSnapshotLines(snapshot: ReportSnapshot): List<String> {
-    return listOf(
-        "Top 分类：${snapshot.topCategoryName}（${MoneyFormat.fromCents(snapshot.topCategoryExpenseCents)}）",
-        "最大单笔：${MoneyFormat.fromCents(snapshot.maxExpenseCents)} · ${snapshot.maxExpenseLabel}",
-        snapshot.changeSummary
-    )
-}
-
-internal fun buildReportSnapshot(
-    title: String,
-    txs: List<TransactionEntity>,
-    previousExpenseCents: Long
-): ReportSnapshot {
-    val expenseTx = txs.filter { it.type == "EXPENSE" }
-    val totalExpense = expenseTx.sumOf { it.amountCents }
-    val topEntry = expenseTx.groupBy { it.parentCategory }
-        .mapValues { (_, list) -> list.sumOf { it.amountCents } }
-        .maxByOrNull { it.value }
-    val maxTx = expenseTx.maxByOrNull { it.amountCents }
-    val delta = totalExpense - previousExpenseCents
-    val ratio = if (previousExpenseCents > 0L) kotlin.math.abs(delta).toFloat() / previousExpenseCents.toFloat() * 100f else 0f
-    val changeSummary = when {
-        previousExpenseCents <= 0L && totalExpense <= 0L -> "与上一周期相比：暂无有效支出数据。"
-        previousExpenseCents <= 0L -> "与上一周期相比：新增支出 ${MoneyFormat.fromCents(totalExpense)}。"
-        delta > 0L -> "与上一周期相比：上升 ${ratio.toInt()}%（+${MoneyFormat.fromCents(delta)}）"
-        delta < 0L -> "与上一周期相比：下降 ${ratio.toInt()}%（${MoneyFormat.fromCents(delta)}）"
-        else -> "与上一周期相比：基本持平。"
-    }
-    val maxLabel = maxTx?.let {
-        val d = Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).toLocalDate()
-        "${it.parentCategory}/${it.childCategory} ${d.monthValue}/${d.dayOfMonth}"
-    } ?: "无"
-    return ReportSnapshot(
-        title = title,
-        totalExpenseCents = totalExpense,
-        topCategoryName = topEntry?.key ?: "无",
-        topCategoryExpenseCents = topEntry?.value ?: 0L,
-        maxExpenseCents = maxTx?.amountCents ?: 0L,
-        maxExpenseLabel = maxLabel,
-        changeSummary = changeSummary
-    )
-}
-
 internal data class AnomalyInsight(
     val id: String,
     val title: String,

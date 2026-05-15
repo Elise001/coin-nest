@@ -19,7 +19,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -48,18 +47,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -85,18 +75,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.ui.theme.Amber700
 import com.example.coin_nest.ui.theme.Coral400
 import com.example.coin_nest.ui.theme.Coral500
 import com.example.coin_nest.ui.theme.Ink
 import com.example.coin_nest.ui.theme.Mint500
-import com.example.coin_nest.ui.theme.Peach100
 import com.example.coin_nest.ui.theme.Sky200
 import com.example.coin_nest.ui.theme.Sky500
 import com.example.coin_nest.ui.theme.Sky700
 import com.example.coin_nest.util.MoneyFormat
-import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 internal val SuccessColor = Mint500
@@ -111,7 +98,7 @@ fun HomeScreen(
     onAddTransaction: (String, Boolean, String, String, String, Long) -> Unit,
     onConfirmPendingAuto: (Long) -> Unit,
     onIgnorePendingAuto: (Long) -> Unit,
-    onUpdateTransactionCategory: (Long, String, String) -> Unit,
+    onUpdateTransactionDetails: (Long, String, String, String) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onLoadMoreMonthTransactions: () -> Unit,
     onLoadMoreYearTransactions: () -> Unit,
@@ -165,6 +152,7 @@ fun HomeScreen(
                         state = state,
                         onOpenRecord = { selectedMainTab = MainTab.Record.ordinal },
                         onOpenInsight = { selectedMainTab = MainTab.Insight.ordinal },
+                        onUpdateTransaction = onUpdateTransactionDetails,
                         onOpenInsightMonthCalendar = {
                             selectedMainTab = MainTab.Insight.ordinal
                             insightOpenMonthDetailToken++
@@ -174,7 +162,7 @@ fun HomeScreen(
                     MainTab.Insight -> InsightTab(
                         state = state,
                         onSelectMonth = onSelectMonth,
-                        onUpdateTransactionCategory = onUpdateTransactionCategory,
+                        onUpdateTransactionDetails = onUpdateTransactionDetails,
                         onDeleteTransaction = onDeleteTransaction,
                         onLoadMoreMonthTransactions = onLoadMoreMonthTransactions,
                         onLoadMoreYearTransactions = onLoadMoreYearTransactions,
@@ -327,6 +315,7 @@ private fun HomeDashboardTab(
     state: HomeUiState,
     onOpenRecord: () -> Unit,
     onOpenInsight: () -> Unit,
+    onUpdateTransaction: (Long, String, String, String) -> Unit,
     onOpenInsightMonthCalendar: () -> Unit
 ) {
     val anomalies = remember(
@@ -344,6 +333,11 @@ private fun HomeDashboardTab(
     }
     val keyAnomaly = remember(anomalies) { anomalies.firstOrNull() }
     val topCategory = remember(state.monthCategoryShare) { state.monthCategoryShare.maxByOrNull { it.amountCents } }
+    val todayPreviewTransactions = remember(state.todayTransactions) {
+        state.todayTransactions
+            .sortedByDescending { it.occurredAtEpochMs }
+            .take(3)
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -391,20 +385,22 @@ private fun HomeDashboardTab(
                     TextButton(onClick = onOpenInsight, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) { Text("更多") }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
-                if (state.todayTransactions.isEmpty()) {
+                if (todayPreviewTransactions.isEmpty()) {
                     Text(
                         "今天还没有记录，点上方“记一笔”补上即可。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    state.todayTransactions
-                        .sortedByDescending { it.occurredAtEpochMs }
-                        .take(3)
-                        .forEachIndexed { index, tx ->
-                            TransactionRow(tx = tx)
-                            if (index != 2) Spacer(modifier = Modifier.height(8.dp))
-                        }
+                    todayPreviewTransactions.forEachIndexed { index, tx ->
+                        TransactionRow(
+                            tx = tx,
+                            categories = state.categories,
+                            allowCategoryEdit = true,
+                            onUpdateTransaction = onUpdateTransaction
+                        )
+                        if (index != todayPreviewTransactions.lastIndex) Spacer(modifier = Modifier.height(8.dp))
+                    }
                 }
             }
         }
@@ -488,6 +484,9 @@ private fun MoneyHeroCard(
         0f
     }.coerceIn(0f, 1.2f)
     val leftBudget = budget?.let { (it - expense).coerceAtLeast(0L) }
+    val monthProjection = remember(expense, budget, month) {
+        budget?.let { buildMonthBudgetProjection(expense = expense, budget = it, month = month, today = LocalDate.now()) }
+    }
     val heroTextColor = Ink
     val heroSubtleColor = MaterialTheme.colorScheme.onSurfaceVariant
     Card(
@@ -592,6 +591,23 @@ private fun MoneyHeroCard(
                                 .height(7.dp)
                                 .clip(RoundedCornerShape(999.dp))
                                 .background(if (budgetRatio >= 0.9f) Coral400 else Sky500)
+                        )
+                    }
+                    if (monthProjection != null) {
+                        Text(
+                            text = "月底预测：${MoneyFormat.fromCents(monthProjection.projectedExpenseCents)}（${monthProjection.statusText}）",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = monthProjection.statusColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = monthProjection.actionText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = heroSubtleColor,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -721,151 +737,9 @@ private fun TopCategoryCard(
     }
 }
 
-
-
-@Composable
-private fun SummaryCard(
-    title: String,
-    income: Long,
-    expense: Long,
-    balance: Long,
-    highlight: Boolean = false,
-    extraLines: List<String> = emptyList(),
-    actionText: String? = null,
-    onAction: (() -> Unit)? = null,
-    onClick: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
-) {
-    val bg = if (highlight) MaterialTheme.colorScheme.secondary.copy(alpha = 0.33f) else MaterialTheme.colorScheme.surface
-    val balanceColor = when {
-        balance > 0L -> SuccessColor
-        balance < 0L -> DangerColor
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-    val clickable = onClick != null
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = bg),
-        border = if (clickable) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)) else null,
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = if (clickable) modifier.clickable { onClick() } else modifier
-    ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(title, fontWeight = FontWeight.SemiBold)
-                if (!actionText.isNullOrBlank() && onAction != null) {
-                    OutlinedButton(onClick = onAction) { Text(actionText) }
-                } else if (clickable) {
-                    Text(
-                        "点击查看月日历 >",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-            Text(
-                "结余：${MoneyFormat.fromCents(balance)}",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = balanceColor,
-                fontFamily = FontFamily.Monospace
-            )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("收入：${MoneyFormat.fromCents(income)}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                Text("支出：${MoneyFormat.fromCents(expense)}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-            }
-            if (extraLines.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(2.dp))
-                extraLines.forEach { line ->
-                    Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BudgetProgressCard(expense: Long, budget: Long, month: YearMonth) {
-    val ratio = if (budget <= 0) 0f else (expense.toFloat() / budget.toFloat()).coerceAtLeast(0f)
-    val percent = (ratio * 100).toInt()
-    val (status, statusColor) = when {
-        ratio >= 1f -> "已超额" to DangerColor
-        ratio >= 0.8f -> "接近上限" to WarningColor
-        else -> "正常" to SuccessColor
-    }
-    val currentMonth = YearMonth.now()
-    val today = LocalDate.now()
-    val remainingBudget = budget - expense
-    val remainingDays = when {
-        month.isBefore(currentMonth) -> 0
-        month == currentMonth -> (month.lengthOfMonth() - today.dayOfMonth + 1).coerceAtLeast(0)
-        else -> month.lengthOfMonth()
-    }
-    val dailySuggestionCents = if (remainingDays > 0) remainingBudget.coerceAtLeast(0L) / remainingDays else 0L
-    val monthProjection = remember(expense, budget, month, today) {
-        buildMonthBudgetProjection(
-            expense = expense,
-            budget = budget,
-            month = month,
-            today = today
-        )
-    }
-    GlassCard {
-        Text("预算进度", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("本月支出：${MoneyFormat.fromCents(expense)} / ${MoneyFormat.fromCents(budget)}")
-        Spacer(modifier = Modifier.height(6.dp))
-        LinearProgressIndicator(
-            progress = { ratio.coerceIn(0f, 1f) },
-            color = statusColor,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(8.dp))
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("使用率：$percent%（$status）", color = statusColor, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = when {
-                remainingBudget < 0L -> "已超预算 ${MoneyFormat.fromCents(-remainingBudget)}，今日建议非必要支出为 0。"
-                remainingDays <= 0 -> "当月预算周期已结束。"
-                month == currentMonth -> "今日建议可支出：${MoneyFormat.fromCents(dailySuggestionCents)}（按月剩余预算均摊）"
-                else -> "日均建议可支出：${MoneyFormat.fromCents(dailySuggestionCents)}（按月预算均摊）"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        if (monthProjection != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "月底预测：${MoneyFormat.fromCents(monthProjection.projectedExpenseCents)}（${monthProjection.statusText}）",
-                style = MaterialTheme.typography.bodySmall,
-                color = monthProjection.statusColor,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = monthProjection.actionText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = monthProjection.paceText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
 private data class MonthBudgetProjection(
     val projectedExpenseCents: Long,
     val statusText: String,
-    val paceText: String,
     val actionText: String,
     val statusColor: Color
 )
@@ -882,505 +756,26 @@ private fun buildMonthBudgetProjection(
     val overrun = projected - budget
     val elapsedPercent = (today.dayOfMonth.toFloat() / month.lengthOfMonth().toFloat() * 100f).toInt()
     val usedPercent = (expense.toFloat() / budget.toFloat() * 100f).toInt()
-    val paceText = "本月已过 $elapsedPercent%，预算已用 $usedPercent%。"
+    val paceSummary = "本月已过 $elapsedPercent%，预算已用 $usedPercent%。"
     return when {
         overrun > 0L -> MonthBudgetProjection(
             projectedExpenseCents = projected,
             statusText = "预计超 ${MoneyFormat.fromCents(overrun)}",
-            paceText = paceText,
-            actionText = "建议今天先压低可选消费，优先检查餐饮、购物、出行等高频分类。",
+            actionText = "$paceSummary 建议先压低可选消费，检查餐饮、购物、出行等高频分类。",
             statusColor = DangerColor
         )
         projected >= budget * 0.9 -> MonthBudgetProjection(
             projectedExpenseCents = projected,
             statusText = "接近预算",
-            paceText = paceText,
-            actionText = "建议接下来几天按今日建议可支出执行，避免月底被动压缩。",
+            actionText = "$paceSummary 接下来几天按日预算执行，避免月底被动压缩。",
             statusColor = WarningColor
         )
         else -> MonthBudgetProjection(
             projectedExpenseCents = projected,
             statusText = "节奏安全",
-            paceText = paceText,
-            actionText = "当前消费节奏可控，保持自动记账和每周复盘即可。",
+            actionText = "$paceSummary 当前消费节奏可控，保持自动记账和每周复盘即可。",
             statusColor = SuccessColor
         )
     }
 }
-
-@Composable
-private fun ChangeNudgeCard(
-    currentExpenseCents: Long,
-    previousExpenseCents: Long,
-    budgetCents: Long?
-) {
-    val delta = currentExpenseCents - previousExpenseCents
-    val ratioToBudget = if (budgetCents != null && budgetCents > 0L) currentExpenseCents.toFloat() / budgetCents.toFloat() else 0f
-    val (title, detail, color) = when {
-        budgetCents != null && budgetCents > 0L && ratioToBudget >= 1f ->
-            Triple("预算超额提醒", "已超预算 ${(ratioToBudget * 100 - 100).toInt()}%，今天建议暂停非必要支出。", DangerColor)
-        previousExpenseCents > 0L && delta > 0L ->
-            Triple("支出上升提醒", "较上期多支出 ${MoneyFormat.fromCents(delta)}，建议先查看高频分类。", WarningColor)
-        previousExpenseCents > 0L && delta < 0L ->
-            Triple("节奏良好", "较上期减少 ${MoneyFormat.fromCents(kotlin.math.abs(delta))}，保持当前节奏。", SuccessColor)
-        else -> Triple("保持记录", "暂无明显异常，继续维持记录频率。", MaterialTheme.colorScheme.primary)
-    }
-    GlassCard(tone = if (color == DangerColor || color == WarningColor) GlassCardTone.Warning else GlassCardTone.Neutral) {
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = color)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun MonthlyComparisonCard(
-    month: YearMonth,
-    currentExpenseCents: Long,
-    previousExpenseCents: Long
-) {
-    val delta = currentExpenseCents - previousExpenseCents
-    val base = previousExpenseCents.coerceAtLeast(1L)
-    val percent = kotlin.math.abs(delta).toFloat() / base.toFloat() * 100f
-    val title = "${month.monthValue}月变化提醒"
-    val trendText = when {
-        previousExpenseCents <= 0L && currentExpenseCents <= 0L -> "本月与上月都暂无支出记录。"
-        previousExpenseCents <= 0L -> "上月几乎无支出，本月为 ${MoneyFormat.fromCents(currentExpenseCents)}。"
-        delta > 0L -> "较上月上升 ${percent.toInt()}%（+${MoneyFormat.fromCents(delta)}）"
-        delta < 0L -> "较上月下降 ${percent.toInt()}%（${MoneyFormat.fromCents(delta)}）"
-        else -> "与上月基本持平。"
-    }
-    val actionText = when {
-        previousExpenseCents > 0L && delta > 0L && percent >= 30f -> "建议：本周先锁定高频支出分类，设一个日上限，避免继续放大。"
-        previousExpenseCents > 0L && delta > 0L -> "建议：接下来几天优先记录大额消费，确认增长来源。"
-        delta < 0L -> "建议：保持当前节奏，继续用模板或自动记账减少手动成本。"
-        else -> "建议：保持记录频率，月底再复盘趋势。"
-    }
-
-    GlassCard {
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("本月支出：${MoneyFormat.fromCents(currentExpenseCents)}")
-        Text("上月支出：${MoneyFormat.fromCents(previousExpenseCents)}")
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(trendText, fontWeight = FontWeight.Medium)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(actionText, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun DaySwitcher(
-    selectedDate: LocalDate,
-    today: LocalDate,
-    onPrev: () -> Unit,
-    onNext: () -> Unit
-) {
-    val canNext = selectedDate.isBefore(today)
-    GlassCard {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedButton(onClick = onPrev, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) { Text("上一天") }
-            Text("${selectedDate.monthValue}/${selectedDate.dayOfMonth}", fontWeight = FontWeight.SemiBold)
-            OutlinedButton(onClick = onNext, enabled = canNext, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) { Text("下一天") }
-        }
-    }
-}
-
-@Composable
-private fun MonthCalendarCard(
-    month: YearMonth,
-    selectedDate: LocalDate,
-    dailySummary: Map<LocalDate, DayAmountSummary>,
-    onSelectDate: (LocalDate) -> Unit
-) {
-    val cells = remember(month) {
-        val firstDay = month.atDay(1)
-        val offset = firstDay.dayOfWeek.value - 1
-        val totalDays = month.lengthOfMonth()
-        val cellCount = ((offset + totalDays + 6) / 7) * 7
-        buildList<LocalDate?> {
-            repeat(offset) { add(null) }
-            for (day in 1..totalDays) add(month.atDay(day))
-            repeat(cellCount - size) { add(null) }
-        }
-    }
-    val weekNames = listOf("一", "二", "三", "四", "五", "六", "日")
-
-    GlassCard {
-        Text("${month.year}年${month.monthValue}月", fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth()) {
-            weekNames.forEach { name -> Text(text = name, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        for (weekIndex in cells.indices step 7) {
-            Row(modifier = Modifier.fillMaxWidth()) {
-                for (i in 0..6) {
-                    val date = cells[weekIndex + i]
-                    val summary = date?.let { dailySummary[it] } ?: DayAmountSummary()
-                    CalendarCell(date = date, selected = date == selectedDate, summary = summary, modifier = Modifier.weight(1f), onClick = { if (date != null) onSelectDate(date) })
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CalendarCell(
-    date: LocalDate?,
-    selected: Boolean,
-    summary: DayAmountSummary,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val hasRecord = summary.incomeCents > 0 || summary.expenseCents > 0
-    val cellBg = when {
-        date == null -> Color.Transparent
-        selected -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f)
-        hasRecord -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-        else -> Color.Transparent
-    }
-    Column(
-        modifier = modifier
-            .height(58.dp)
-            .padding(2.dp)
-            .background(cellBg, RoundedCornerShape(8.dp))
-            .clickable(enabled = date != null, onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 3.dp),
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(text = date?.dayOfMonth?.toString().orEmpty(), style = MaterialTheme.typography.bodySmall)
-        if (date != null && hasRecord) {
-            Text(text = "支${summary.expenseCents / 100}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            Spacer(modifier = Modifier.height(1.dp))
-        }
-    }
-}
-
-@Composable
-internal fun PendingTransactionRow(
-    tx: TransactionEntity,
-    onConfirm: () -> Unit,
-    onIgnore: () -> Unit
-) {
-    val smartTag = remember(tx.note) { parseSmartTag(tx.note) }
-    val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
-    val sourceLabel = formatSourceLabel(tx.source)
-    val timeText = remember(tx.occurredAtEpochMs) {
-        Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter)
-    }
-    var showNoteDialog by rememberSaveable(tx.id) { androidx.compose.runtime.mutableStateOf(false) }
-    Card(
-        modifier = Modifier.clickable { showNoteDialog = true },
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.24f)),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
-            val prefix = if (tx.type == "INCOME") "+" else "-"
-            val txLabel = if (tx.type == "INCOME") "收入" else "支出"
-            Text("待确认$txLabel $prefix${MoneyFormat.fromCents(tx.amountCents)}", fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "来源：$sourceLabel · 时间：$timeText",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (displayNote.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "备注：$displayNote",
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            if (!smartTag.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    "智能命中：$smartTag",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SuccessColor
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onIgnore, modifier = Modifier.weight(1f)) { Text("取消") }
-                Button(onClick = onConfirm, modifier = Modifier.weight(1f)) { Text("确认入账") }
-            }
-        }
-    }
-    if (showNoteDialog) {
-        NoteDetailDialog(
-            title = "待确认备注",
-            source = "$sourceLabel · $timeText",
-            note = displayNote,
-            onDismiss = { showNoteDialog = false }
-        )
-    }
-    Spacer(modifier = Modifier.height(8.dp))
-}
-
-@Composable
-private fun TransactionRow(
-    tx: TransactionEntity,
-    allowCategoryEdit: Boolean = false,
-    onEditCategory: (() -> Unit)? = null,
-    onDelete: (() -> Unit)? = null
-) {
-    val prefix = if (tx.type == "INCOME") "+" else "-"
-    val amountColor = if (tx.type == "INCOME") SuccessColor else DangerColor
-    val sourceLabel = formatSourceLabel(tx.source)
-    val timeText = remember(tx.occurredAtEpochMs) { Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter) }
-    val smartTag = remember(tx.note) { parseSmartTag(tx.note) }
-    val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
-    var showNoteDialog by rememberSaveable(tx.id) { androidx.compose.runtime.mutableStateOf(false) }
-    Card(
-        modifier = Modifier.clickable { showNoteDialog = true },
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.24f)),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "$prefix${MoneyFormat.fromCents(tx.amountCents)}",
-                    fontWeight = FontWeight.Bold,
-                    color = amountColor,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    "${tx.parentCategory}/${tx.childCategory}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                "来源：$sourceLabel  时间：$timeText",
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (displayNote.isNotBlank()) {
-                Text(
-                    "备注：$displayNote",
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            if (!smartTag.isNullOrBlank()) {
-                Text(
-                    "智能命中：$smartTag",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SuccessColor
-                )
-            }
-            if (allowCategoryEdit || onDelete != null) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    if (allowCategoryEdit && onEditCategory != null) {
-                        Text(
-                            "调整分类",
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onEditCategory() }
-                                .defaultMinSize(minHeight = 44.dp)
-                                .padding(horizontal = 8.dp, vertical = 10.dp)
-                        )
-                    }
-                    if (onDelete != null) {
-                        Text(
-                            "删除",
-                            color = DangerColor,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onDelete() }
-                                .defaultMinSize(minHeight = 44.dp)
-                                .padding(horizontal = 8.dp, vertical = 10.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-    if (showNoteDialog) {
-        NoteDetailDialog(
-            title = "流水备注",
-            source = sourceLabel,
-            note = displayNote,
-            onDismiss = { showNoteDialog = false }
-        )
-    }
-}
-
-@Composable
-internal fun NoteDetailDialog(
-    title: String,
-    source: String,
-    note: String,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, fontWeight = FontWeight.SemiBold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "来源：$source",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = note.ifBlank { "无备注" },
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("知道了")
-            }
-        }
-    )
-}
-
-private fun parseSmartTag(note: String): String? {
-    val match = Regex("\\[SMART:([^\\]]+)\\]").find(note) ?: return null
-    return match.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun ReadonlyDropdownField(
-    value: String,
-    label: String,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    options: List<String>,
-    isError: Boolean = false,
-    onOptionSelected: (String) -> Unit
-) {
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { onExpandedChange(!expanded) }) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = {},
-            readOnly = true,
-            isError = isError,
-            modifier = Modifier
-                .menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true)
-                .fillMaxWidth(),
-            label = { Text(label) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option) },
-                    onClick = {
-                        onOptionSelected(option)
-                        onExpandedChange(false)
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun SectionTitle(
-    title: String,
-    subtitle: String? = null
-) {
-    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-    if (!subtitle.isNullOrBlank()) {
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-internal fun PrimaryActionButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    shape: RoundedCornerShape = RoundedCornerShape(12.dp),
-    containerColor: Color = MaterialTheme.colorScheme.primary,
-    interactionSource: MutableInteractionSource? = null
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.defaultMinSize(minHeight = 48.dp),
-        enabled = enabled,
-        shape = shape,
-        interactionSource = interactionSource,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = containerColor,
-            contentColor = MaterialTheme.colorScheme.onPrimary
-        )
-    ) {
-        Text(text, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-
-
-internal enum class GlassCardTone { Neutral, Warning }
-
-@Composable
-internal fun GlassCard(
-    tone: GlassCardTone = GlassCardTone.Neutral,
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    val container = when (tone) {
-        GlassCardTone.Neutral -> MaterialTheme.colorScheme.surface
-        GlassCardTone.Warning -> Peach100
-    }
-    val border = when (tone) {
-        GlassCardTone.Neutral -> MaterialTheme.colorScheme.outline.copy(alpha = 0.26f)
-        GlassCardTone.Warning -> Coral400.copy(alpha = 0.56f)
-    }
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, border),
-        colors = CardDefaults.cardColors(containerColor = container),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), content = content)
-    }
-}
-
-
-
-
-
-
 

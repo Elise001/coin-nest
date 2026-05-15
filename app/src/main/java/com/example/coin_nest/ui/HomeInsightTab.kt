@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,14 +52,13 @@ import com.example.coin_nest.util.MoneyFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
-import java.util.Locale
 import kotlin.math.roundToInt
 
 @Composable
 internal fun InsightTab(
     state: HomeUiState,
     onSelectMonth: (YearMonth) -> Unit,
-    onUpdateTransactionCategory: (Long, String, String) -> Unit,
+    onUpdateTransactionDetails: (Long, String, String, String) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onLoadMoreMonthTransactions: () -> Unit,
     onLoadMoreYearTransactions: () -> Unit,
@@ -68,7 +66,6 @@ internal fun InsightTab(
     onMonthDetailJumpHandled: () -> Unit = {},
     onOpenBudgetSettings: () -> Unit = {}
 ) {
-    onUpdateTransactionCategory
     val nav = rememberNavController()
     var lastHandledMonthDetailToken by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(OverviewTabMode.Monthly) }
@@ -243,7 +240,12 @@ internal fun InsightTab(
                     }
                 } else {
                     items(results.take(80), key = { it.id }) { tx ->
-                        InsightTransactionRow(tx = tx, onDelete = { deleteTx = tx })
+                        InsightTransactionRow(
+                            tx = tx,
+                            categories = state.categories,
+                            onUpdateTransaction = onUpdateTransactionDetails,
+                            onDelete = { deleteTx = tx }
+                        )
                     }
                     if (results.size > 80) {
                         item {
@@ -316,7 +318,12 @@ internal fun InsightTab(
                     }
                 } else {
                     items(selectedWeekDayTx, key = { it.id }) { tx ->
-                        InsightTransactionRow(tx = tx, onDelete = { deleteTx = tx })
+                        InsightTransactionRow(
+                            tx = tx,
+                            categories = state.categories,
+                            onUpdateTransaction = onUpdateTransactionDetails,
+                            onDelete = { deleteTx = tx }
+                        )
                     }
                 }
             }
@@ -367,7 +374,12 @@ internal fun InsightTab(
                     }
                 } else {
                     items(selectedMonthDayTx, key = { it.id }) { tx ->
-                        InsightTransactionRow(tx = tx, onDelete = { deleteTx = tx })
+                        InsightTransactionRow(
+                            tx = tx,
+                            categories = state.categories,
+                            onUpdateTransaction = onUpdateTransactionDetails,
+                            onDelete = { deleteTx = tx }
+                        )
                     }
                     if (state.monthHasMore) {
                         item {
@@ -694,141 +706,6 @@ private fun buildSpendingFocusInsight(
     )
 }
 
-private enum class LocalSearchType(val title: String) {
-    All("全部"),
-    Expense("支出"),
-    Income("收入")
-}
-
-@Composable
-private fun LocalSearchControlCard(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    type: LocalSearchType,
-    onTypeChange: (LocalSearchType) -> Unit
-) {
-    GlassCard {
-        Text("本地找账", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            "搜索本年已加载流水，不联网、不上传。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("金额 / 分类 / 来源 / 备注") },
-            placeholder = { Text("例如 13.70、餐饮、支付宝") }
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            LocalSearchType.entries.forEach { item ->
-                val selected = item == type
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
-                        .border(
-                            width = 1.dp,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                            } else {
-                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                            },
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                        .clickable { onTypeChange(item) }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocalSearchSummaryCard(
-    query: String,
-    results: List<TransactionEntity>,
-    hasMore: Boolean,
-    onLoadMore: () -> Unit
-) {
-    val incomeCents = remember(results) { results.filter { it.type == "INCOME" }.sumOf { it.amountCents } }
-    val expenseCents = remember(results) { results.filter { it.type == "EXPENSE" }.sumOf { it.amountCents } }
-    GlassCard {
-        Text(
-            text = if (query.isBlank()) "当前展示本年已加载流水" else "找到 ${results.size} 条匹配流水",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MetricPill("收入", MoneyFormat.fromCents(incomeCents), Modifier.weight(1f))
-            MetricPill("支出", MoneyFormat.fromCents(expenseCents), Modifier.weight(1f))
-        }
-        if (hasMore) {
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(onClick = onLoadMore, modifier = Modifier.fillMaxWidth()) {
-                Text("加载更多本年流水")
-            }
-        }
-    }
-}
-
-private fun filterLocalTransactions(
-    transactions: List<TransactionEntity>,
-    query: String,
-    type: LocalSearchType
-): List<TransactionEntity> {
-    val terms = query
-        .trim()
-        .lowercase(Locale.ROOT)
-        .split(Regex("\\s+"))
-        .filter { it.isNotBlank() }
-    return transactions
-        .asSequence()
-        .filter { tx ->
-            when (type) {
-                LocalSearchType.All -> true
-                LocalSearchType.Expense -> tx.type == "EXPENSE"
-                LocalSearchType.Income -> tx.type == "INCOME"
-            }
-        }
-        .filter { tx -> terms.isEmpty() || terms.all { term -> localSearchText(tx).contains(term) } }
-        .sortedByDescending { it.occurredAtEpochMs }
-        .toList()
-}
-
-private fun localSearchText(tx: TransactionEntity): String {
-    val typeLabel = if (tx.type == "INCOME") "收入" else "支出"
-    val amountYuan = "%.2f".format(Locale.US, tx.amountCents / 100.0)
-    val timeText = Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter)
-    return listOf(
-        typeLabel,
-        amountYuan,
-        MoneyFormat.fromCents(tx.amountCents),
-        tx.amountCents.toString(),
-        tx.parentCategory,
-        tx.childCategory,
-        tx.source,
-        formatSourceLabel(tx.source),
-        tx.note,
-        timeText
-    ).joinToString(" ").lowercase(Locale.ROOT)
-}
-
 @Composable
 private fun AchievementMotivationCard(feedback: RetentionFeedbackState) {
     val milestones = listOf(3, 7, 14, 30)
@@ -1030,39 +907,17 @@ private fun InsightMonthCalendarCard(
 }
 
 @Composable
-private fun InsightTransactionRow(tx: TransactionEntity, onDelete: () -> Unit) {
-    val prefix = if (tx.type == "INCOME") "+" else "-"
-    val amountColor = if (tx.type == "INCOME") SuccessColor else DangerColor
-    val timeText = remember(tx.occurredAtEpochMs) { Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter) }
-    val sourceLabel = formatSourceLabel(tx.source)
-    val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
-    var showNoteDialog by rememberSaveable(tx.id) { mutableStateOf(false) }
-    GlassCard(modifier = Modifier.clickable { showNoteDialog = true }) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("$prefix${MoneyFormat.fromCents(tx.amountCents)}", fontWeight = FontWeight.Bold, color = amountColor, fontFamily = FontFamily.Monospace)
-                Text("${tx.parentCategory}/${tx.childCategory}", style = MaterialTheme.typography.bodySmall)
-                Text(timeText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("来源：$sourceLabel", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (displayNote.isNotBlank()) {
-                    Text(
-                        text = "备注：$displayNote",
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-            TextButton(onClick = onDelete, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) {
-                Text("删除", color = DangerColor)
-            }
-        }
-    }
-    if (showNoteDialog) {
-        NoteDetailDialog(
-            title = "流水备注",
-            source = sourceLabel,
-            note = displayNote,
-            onDismiss = { showNoteDialog = false }
-        )
-    }
+private fun InsightTransactionRow(
+    tx: TransactionEntity,
+    categories: List<com.example.coin_nest.data.model.CategoryItem>,
+    onUpdateTransaction: (Long, String, String, String) -> Unit,
+    onDelete: () -> Unit
+) {
+    TransactionRow(
+        tx = tx,
+        categories = categories,
+        allowCategoryEdit = true,
+        onUpdateTransaction = onUpdateTransaction,
+        onDelete = onDelete
+    )
 }

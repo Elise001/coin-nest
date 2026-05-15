@@ -1,7 +1,6 @@
 ﻿package com.example.coin_nest.ui
 
 import android.app.DatePickerDialog
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -449,7 +448,6 @@ internal fun RecordTab(
                         selectedTemplateLabel = ""
                         selectedCategoryShortcut = ""
                         showNoteField = false
-                        Toast.makeText(context, "已保存${if (isIncome) "收入" else "支出"} ${MoneyFormat.fromCents(amountCents)}", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier
                         .fillMaxWidth()

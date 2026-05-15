@@ -41,16 +41,6 @@ internal data class RecordTemplate(
     val note: String
 )
 
-internal data class ReportSnapshot(
-    val title: String,
-    val totalExpenseCents: Long,
-    val topCategoryName: String,
-    val topCategoryExpenseCents: Long,
-    val maxExpenseCents: Long,
-    val maxExpenseLabel: String,
-    val changeSummary: String
-)
-
 internal val zone: ZoneId = ZoneId.systemDefault()
 internal val rowTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm")
 internal val dateOnlyFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")

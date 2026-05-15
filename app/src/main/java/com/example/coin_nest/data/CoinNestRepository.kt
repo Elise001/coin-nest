@@ -13,32 +13,14 @@ import com.example.coin_nest.data.db.STATUS_PENDING
 import com.example.coin_nest.data.db.SmartCategoryRuleEntity
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.data.model.BalanceSummary
-import com.example.coin_nest.data.model.BackupPayload
 import com.example.coin_nest.data.model.CategoryItem
 import com.example.coin_nest.data.model.TransactionInput
 import com.example.coin_nest.data.model.TransactionType
-import org.json.JSONArray
-import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
-
-internal const val AUTO_CHANNEL_WINDOW_DUPLICATE_MS = 60_000L
-internal const val AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS = 90_000L
-internal const val AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS = AUTO_CHANNEL_WINDOW_DUPLICATE_MS
-
-internal fun isWithinAutoSameSourceWindow(existingOccurredAt: Long, incomingOccurredAt: Long): Boolean {
-    return kotlin.math.abs(existingOccurredAt - incomingOccurredAt) <= AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS
-}
-
-internal fun shouldDedupeByAutoChannel(existingChannel: String, incomingChannel: String): Boolean {
-    val e = existingChannel.uppercase()
-    val i = incomingChannel.uppercase()
-    if (e.isBlank() || i.isBlank()) return false
-    return e in setOf("NOTIFY", "ACCESS") && i in setOf("NOTIFY", "ACCESS")
-}
 
 data class AutoTransactionInsertResult(
     val insertedId: Long?,
@@ -66,6 +48,7 @@ private data class SmartCategorySuggestion(
 class CoinNestRepository(context: Context) {
     private val dbHelper = CoinNestDbHelper(context.applicationContext)
     private val changeTick = MutableStateFlow(0L)
+    private val backupStore by lazy { CoinNestBackupStore(dbHelper) { notifyChanged() } }
 
     fun observeRecentTransactions(limit: Int = 50): Flow<List<TransactionEntity>> {
         return changeTick.map {
@@ -263,24 +246,30 @@ class CoinNestRepository(context: Context) {
         notifyChanged()
     }
 
-    suspend fun updateTransactionCategory(
+    suspend fun updateTransactionDetails(
         id: Long,
         parentCategory: String,
-        childCategory: String
+        childCategory: String,
+        note: String
     ) = withContext(Dispatchers.IO) {
         if (parentCategory.isBlank() || childCategory.isBlank()) return@withContext
         val txBeforeUpdate = queryTransactionById(id)
+        val trimmedParent = parentCategory.trim()
+        val trimmedChild = childCategory.trim()
         val values = ContentValues().apply {
-            put("parent_category", parentCategory.trim())
-            put("child_category", childCategory.trim())
+            put("parent_category", trimmedParent)
+            put("child_category", trimmedChild)
+            put("note", note.trim())
         }
         dbHelper.writableDatabase.update("transactions", values, "id = ?", arrayOf(id.toString()))
         txBeforeUpdate?.let { tx ->
-            learnSmartCategoryRuleFromUserCorrection(
-                tx = tx,
-                targetParent = parentCategory.trim(),
-                targetChild = childCategory.trim()
-            )
+            if (tx.parentCategory != trimmedParent || tx.childCategory != trimmedChild) {
+                learnSmartCategoryRuleFromUserCorrection(
+                    tx = tx,
+                    targetParent = trimmedParent,
+                    targetChild = trimmedChild
+                )
+            }
         }
         notifyChanged()
     }
@@ -290,93 +279,10 @@ class CoinNestRepository(context: Context) {
         notifyChanged()
     }
 
-    suspend fun exportBackupJson(): String = withContext(Dispatchers.IO) {
-        val payload = BackupPayload(
-            transactions = queryAllTransactions(),
-            categories = queryCategories().map { CategoryItem(it.parent, it.child) },
-            budgets = queryAllBudgets(),
-            categoryBudgets = queryAllCategoryBudgets(),
-            smartCategoryRules = queryAllSmartCategoryRules()
-        )
-        toJson(payload)
-    }
+    suspend fun exportBackupJson(): String = backupStore.exportBackupJson()
 
-    suspend fun importBackupJson(json: String, replaceExisting: Boolean = false): Pair<Int, Int> = withContext(Dispatchers.IO) {
-        val parsed = fromJson(json)
-        val db = dbHelper.writableDatabase
-        var txCount = 0
-        var catCount = 0
-        db.beginTransaction()
-        try {
-            if (replaceExisting) {
-                db.delete("transactions", null, null)
-                db.delete("categories", null, null)
-                db.delete("monthly_budget", null, null)
-                db.delete("category_budget", null, null)
-                db.delete("smart_category_rule", null, null)
-            }
-
-            parsed.categories.forEach { cat ->
-                val values = ContentValues().apply {
-                    put("parent", cat.parent)
-                    put("child", cat.child)
-                }
-                val id = db.insertWithOnConflict("categories", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
-                if (id != -1L) catCount++
-            }
-
-            parsed.transactions.forEach { tx ->
-                val values = ContentValues().apply {
-                    put("amount_cents", tx.amountCents)
-                    put("type", tx.type)
-                    put("parent_category", tx.parentCategory)
-                    put("child_category", tx.childCategory)
-                    put("source", tx.source)
-                    put("note", tx.note)
-                    put("occurred_at_epoch_ms", tx.occurredAtEpochMs)
-                    put("created_at_epoch_ms", tx.createdAtEpochMs)
-                    put("status", tx.status)
-                    put("fingerprint", tx.fingerprint)
-                }
-                val id = db.insertWithOnConflict("transactions", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
-                if (id != -1L) txCount++
-            }
-
-            parsed.budgets.forEach { budget ->
-                val values = ContentValues().apply {
-                    put("month_key", budget.monthKey)
-                    put("limit_cents", budget.limitCents)
-                }
-                db.insertWithOnConflict("monthly_budget", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
-            }
-            parsed.categoryBudgets.forEach { budget ->
-                val values = ContentValues().apply {
-                    put("month_key", budget.monthKey)
-                    put("parent_category", budget.parentCategory)
-                    put("child_category", budget.childCategory)
-                    put("limit_cents", budget.limitCents)
-                }
-                db.insertWithOnConflict("category_budget", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
-            }
-            parsed.smartCategoryRules.forEach { rule ->
-                val values = ContentValues().apply {
-                    put("type", rule.type)
-                    put("source", rule.source)
-                    put("keyword", rule.keyword)
-                    put("parent_category", rule.parentCategory)
-                    put("child_category", rule.childCategory)
-                    put("hit_count", rule.hitCount)
-                    put("updated_at_epoch_ms", rule.updatedAtEpochMs)
-                }
-                db.insertWithOnConflict("smart_category_rule", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
-            }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
-        notifyChanged()
-        txCount to catCount
-    }
+    suspend fun importBackupJson(json: String, replaceExisting: Boolean = false): Pair<Int, Int> =
+        backupStore.importBackupJson(json, replaceExisting)
 
     suspend fun upsertMonthBudget(monthKey: String, limitCents: Long) = withContext(Dispatchers.IO) {
         val values = ContentValues().apply {
@@ -1153,228 +1059,4 @@ class CoinNestRepository(context: Context) {
         }
     }
 
-    private fun queryAllBudgets(): List<MonthlyBudgetEntity> {
-        val cursor = dbHelper.readableDatabase.query(
-            "monthly_budget",
-            arrayOf("month_key", "limit_cents"),
-            null,
-            null,
-            null,
-            null,
-            "month_key ASC"
-        )
-        return cursor.use { c ->
-            buildList {
-                while (c.moveToNext()) {
-                    add(
-                        MonthlyBudgetEntity(
-                            monthKey = c.getString(c.getColumnIndexOrThrow("month_key")),
-                            limitCents = c.getLong(c.getColumnIndexOrThrow("limit_cents"))
-                        )
-                    )
-                }
-            }
-        }
-    }
-
-    private fun queryAllCategoryBudgets(): List<CategoryBudgetEntity> {
-        val cursor = dbHelper.readableDatabase.query(
-            "category_budget",
-            arrayOf("month_key", "parent_category", "child_category", "limit_cents"),
-            null,
-            null,
-            null,
-            null,
-            "month_key ASC, parent_category ASC, child_category ASC"
-        )
-        return cursor.use { c ->
-            buildList {
-                while (c.moveToNext()) {
-                    add(
-                        CategoryBudgetEntity(
-                            monthKey = c.getString(c.getColumnIndexOrThrow("month_key")),
-                            parentCategory = c.getString(c.getColumnIndexOrThrow("parent_category")),
-                            childCategory = c.getString(c.getColumnIndexOrThrow("child_category")),
-                            limitCents = c.getLong(c.getColumnIndexOrThrow("limit_cents"))
-                        )
-                    )
-                }
-            }
-        }
-    }
-
-    private fun queryAllTransactions(): List<TransactionEntity> {
-        val cursor = dbHelper.readableDatabase.query(
-            "transactions",
-            null,
-            null,
-            null,
-            null,
-            null,
-            "occurred_at_epoch_ms DESC"
-        )
-        return cursor.use { c -> buildTransactions(c) }
-    }
-
-    private fun toJson(payload: BackupPayload): String {
-        val root = JSONObject()
-        root.put("version", 1)
-        root.put("exported_at", System.currentTimeMillis())
-        val txArray = JSONArray()
-        payload.transactions.forEach { tx ->
-            val obj = JSONObject()
-            obj.put("amount_cents", tx.amountCents)
-            obj.put("type", tx.type)
-            obj.put("parent_category", tx.parentCategory)
-            obj.put("child_category", tx.childCategory)
-            obj.put("source", tx.source)
-            obj.put("note", tx.note)
-            obj.put("occurred_at_epoch_ms", tx.occurredAtEpochMs)
-            obj.put("created_at_epoch_ms", tx.createdAtEpochMs)
-            obj.put("status", tx.status)
-            obj.put("fingerprint", tx.fingerprint ?: JSONObject.NULL)
-            txArray.put(obj)
-        }
-        root.put("transactions", txArray)
-
-        val categoryArray = JSONArray()
-        payload.categories.forEach { cat ->
-            val obj = JSONObject()
-            obj.put("parent", cat.parent)
-            obj.put("child", cat.child)
-            categoryArray.put(obj)
-        }
-        root.put("categories", categoryArray)
-
-        val budgetArray = JSONArray()
-        payload.budgets.forEach { budget ->
-            val obj = JSONObject()
-            obj.put("month_key", budget.monthKey)
-            obj.put("limit_cents", budget.limitCents)
-            budgetArray.put(obj)
-        }
-        root.put("budgets", budgetArray)
-
-        val categoryBudgetArray = JSONArray()
-        payload.categoryBudgets.forEach { budget ->
-            val obj = JSONObject()
-            obj.put("month_key", budget.monthKey)
-            obj.put("parent_category", budget.parentCategory)
-            obj.put("child_category", budget.childCategory)
-            obj.put("limit_cents", budget.limitCents)
-            categoryBudgetArray.put(obj)
-        }
-        root.put("category_budgets", categoryBudgetArray)
-
-        val smartRuleArray = JSONArray()
-        payload.smartCategoryRules.forEach { rule ->
-            val obj = JSONObject()
-            obj.put("type", rule.type)
-            obj.put("source", rule.source)
-            obj.put("keyword", rule.keyword)
-            obj.put("parent_category", rule.parentCategory)
-            obj.put("child_category", rule.childCategory)
-            obj.put("hit_count", rule.hitCount)
-            obj.put("updated_at_epoch_ms", rule.updatedAtEpochMs)
-            smartRuleArray.put(obj)
-        }
-        root.put("smart_category_rules", smartRuleArray)
-
-        return root.toString()
-    }
-
-    private fun fromJson(json: String): BackupPayload {
-        val root = JSONObject(json)
-        val txList = mutableListOf<TransactionEntity>()
-        val txArray = root.optJSONArray("transactions") ?: JSONArray()
-        for (i in 0 until txArray.length()) {
-            val obj = txArray.getJSONObject(i)
-            txList += TransactionEntity(
-                amountCents = obj.optLong("amount_cents", 0L),
-                type = obj.optString("type", "EXPENSE"),
-                parentCategory = obj.optString("parent_category", "待分类"),
-                childCategory = obj.optString("child_category", "自动识别"),
-                source = obj.optString("source", "IMPORTED"),
-                note = obj.optString("note", ""),
-                occurredAtEpochMs = obj.optLong("occurred_at_epoch_ms", System.currentTimeMillis()),
-                createdAtEpochMs = obj.optLong("created_at_epoch_ms", System.currentTimeMillis()),
-                status = obj.optString("status", STATUS_CONFIRMED),
-                fingerprint = if (obj.has("fingerprint") && !obj.isNull("fingerprint")) obj.optString("fingerprint") else null
-            )
-        }
-
-        val categories = mutableListOf<CategoryItem>()
-        val categoryArray = root.optJSONArray("categories") ?: JSONArray()
-        for (i in 0 until categoryArray.length()) {
-            val obj = categoryArray.getJSONObject(i)
-            categories += CategoryItem(
-                parent = obj.optString("parent", ""),
-                child = obj.optString("child", "")
-            )
-        }
-
-        val budgets = mutableListOf<MonthlyBudgetEntity>()
-        val budgetArray = root.optJSONArray("budgets") ?: JSONArray()
-        for (i in 0 until budgetArray.length()) {
-            val obj = budgetArray.getJSONObject(i)
-            budgets += MonthlyBudgetEntity(
-                monthKey = obj.optString("month_key", ""),
-                limitCents = obj.optLong("limit_cents", 0L)
-            )
-        }
-        val categoryBudgets = mutableListOf<CategoryBudgetEntity>()
-        val categoryBudgetArray = root.optJSONArray("category_budgets") ?: JSONArray()
-        for (i in 0 until categoryBudgetArray.length()) {
-            val obj = categoryBudgetArray.getJSONObject(i)
-            categoryBudgets += CategoryBudgetEntity(
-                monthKey = obj.optString("month_key", ""),
-                parentCategory = obj.optString("parent_category", ""),
-                childCategory = obj.optString("child_category", ""),
-                limitCents = obj.optLong("limit_cents", 0L)
-            )
-        }
-        val smartRules = mutableListOf<SmartCategoryRuleEntity>()
-        val smartRuleArray = root.optJSONArray("smart_category_rules") ?: JSONArray()
-        for (i in 0 until smartRuleArray.length()) {
-            val obj = smartRuleArray.getJSONObject(i)
-            smartRules += SmartCategoryRuleEntity(
-                type = obj.optString("type", "EXPENSE"),
-                source = obj.optString("source", "AUTO_NOTIFY"),
-                keyword = obj.optString("keyword", ""),
-                parentCategory = obj.optString("parent_category", "待分类"),
-                childCategory = obj.optString("child_category", "自动识别"),
-                hitCount = obj.optInt("hit_count", 1),
-                updatedAtEpochMs = obj.optLong("updated_at_epoch_ms", System.currentTimeMillis())
-            )
-        }
-        return BackupPayload(
-            transactions = txList,
-            categories = categories,
-            budgets = budgets,
-            categoryBudgets = categoryBudgets,
-            smartCategoryRules = smartRules
-        )
-    }
-
-    private fun buildTransactions(cursor: android.database.Cursor): List<TransactionEntity> {
-        return buildList {
-            while (cursor.moveToNext()) {
-                add(
-                    TransactionEntity(
-                        id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                        amountCents = cursor.getLong(cursor.getColumnIndexOrThrow("amount_cents")),
-                        type = cursor.getString(cursor.getColumnIndexOrThrow("type")),
-                        parentCategory = cursor.getString(cursor.getColumnIndexOrThrow("parent_category")),
-                        childCategory = cursor.getString(cursor.getColumnIndexOrThrow("child_category")),
-                        source = cursor.getString(cursor.getColumnIndexOrThrow("source")),
-                        note = cursor.getString(cursor.getColumnIndexOrThrow("note")),
-                        occurredAtEpochMs = cursor.getLong(cursor.getColumnIndexOrThrow("occurred_at_epoch_ms")),
-                        createdAtEpochMs = cursor.getLong(cursor.getColumnIndexOrThrow("created_at_epoch_ms")),
-                        status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
-                        fingerprint = cursor.getString(cursor.getColumnIndexOrThrow("fingerprint"))
-                    )
-                )
-            }
-        }
-    }
 }
