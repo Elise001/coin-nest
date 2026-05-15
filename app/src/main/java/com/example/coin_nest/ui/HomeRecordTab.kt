@@ -9,11 +9,13 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,6 +39,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -404,15 +411,9 @@ internal fun RecordTab(
                         maxLines = 2
                     )
                 } else {
-                    Text(
-                        "＋ 添加备注（可选）",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showNoteField = true }
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    )
+                    TextButton(onClick = { showNoteField = true }) {
+                        Text("添加备注（可选）")
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -712,12 +713,17 @@ private fun SegmentedSelector(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
+                    .heightIn(min = 44.dp)
                     .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
                     .border(
                         width = 1.dp,
                         color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
                         shape = RoundedCornerShape(10.dp)
                     )
+                    .semantics {
+                        role = Role.Tab
+                        this.selected = selected
+                    }
                     .clickable { onSelect(index) }
                     .padding(vertical = 9.dp),
                 contentAlignment = Alignment.Center
@@ -741,6 +747,7 @@ private fun QuickActionChip(
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
+            .defaultMinSize(minHeight = 44.dp)
             .background(
                 if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                 else MaterialTheme.colorScheme.surface
@@ -751,8 +758,12 @@ private fun QuickActionChip(
                 else MaterialTheme.colorScheme.outline.copy(alpha = 0.28f),
                 RoundedCornerShape(999.dp)
             )
+            .semantics {
+                role = Role.Button
+                this.selected = selected
+            }
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         Text(
             text = label,

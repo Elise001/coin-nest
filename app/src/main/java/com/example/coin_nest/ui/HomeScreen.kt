@@ -1,33 +1,50 @@
 ﻿package com.example.coin_nest.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -60,6 +77,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,6 +95,7 @@ internal val SuccessColor = Color(0xFF2E7D32)
 internal val DangerColor = Color(0xFFB23A30)
 internal val WarningColor = Color(0xFFD8894A)
 
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun HomeScreen(
     state: HomeUiState,
@@ -128,41 +150,53 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(6.dp))
 
         Box(modifier = Modifier.weight(1f)) {
-            when (mainTabs[selectedMainTab]) {
-                MainTab.Home -> HomeDashboardTab(
-                    state = state,
-                    onOpenInsight = { selectedMainTab = MainTab.Insight.ordinal },
-                    onOpenInsightMonthCalendar = {
-                        selectedMainTab = MainTab.Insight.ordinal
-                        insightOpenMonthDetailToken++
-                    }
-                )
-                MainTab.Record -> RecordTab(state, onAddTransaction, onConfirmPendingAuto, onIgnorePendingAuto)
-                MainTab.Insight -> InsightTab(
-                    state = state,
-                    onSelectMonth = onSelectMonth,
-                    onUpdateTransactionCategory = onUpdateTransactionCategory,
-                    onDeleteTransaction = onDeleteTransaction,
-                    onLoadMoreMonthTransactions = onLoadMoreMonthTransactions,
-                    onLoadMoreYearTransactions = onLoadMoreYearTransactions,
-                    openMonthDetailAtTodayToken = insightOpenMonthDetailToken,
-                    onMonthDetailJumpHandled = { insightOpenMonthDetailToken = 0 },
-                    onOpenBudgetSettings = {
-                        selectedMainTab = MainTab.Profile.ordinal
-                        settingsOpenBudgetToken++
-                    }
-                )
-                MainTab.Profile -> SettingsTab(
-                    state = state,
-                    onAddCategory = onAddCategory,
-                    onSetMonthBudget = onSetMonthBudget,
-                    onSetCategoryBudget = onSetCategoryBudget,
-                    onExportBackup = onExportBackup,
-                    onClearSmartRules = onClearSmartRules,
-                    onImportBackup = onImportBackup,
-                    openBudgetAtToken = settingsOpenBudgetToken,
-                    onBudgetJumpHandled = { settingsOpenBudgetToken = 0 }
-                )
+            AnimatedContent(
+                targetState = selectedMainTab,
+                transitionSpec = {
+                    val direction = if (targetState > initialState) 1 else -1
+                    (slideInHorizontally(animationSpec = tween(220)) { it / 6 * direction } + fadeIn(tween(180)))
+                        .togetherWith(slideOutHorizontally(animationSpec = tween(180)) { -it / 8 * direction } + fadeOut(tween(120)))
+                        .using(SizeTransform(clip = false))
+                },
+                label = "main_tab_transition"
+            ) { tabIndex ->
+                when (mainTabs[tabIndex]) {
+                    MainTab.Home -> HomeDashboardTab(
+                        state = state,
+                        onOpenRecord = { selectedMainTab = MainTab.Record.ordinal },
+                        onOpenInsight = { selectedMainTab = MainTab.Insight.ordinal },
+                        onOpenInsightMonthCalendar = {
+                            selectedMainTab = MainTab.Insight.ordinal
+                            insightOpenMonthDetailToken++
+                        }
+                    )
+                    MainTab.Record -> RecordTab(state, onAddTransaction, onConfirmPendingAuto, onIgnorePendingAuto)
+                    MainTab.Insight -> InsightTab(
+                        state = state,
+                        onSelectMonth = onSelectMonth,
+                        onUpdateTransactionCategory = onUpdateTransactionCategory,
+                        onDeleteTransaction = onDeleteTransaction,
+                        onLoadMoreMonthTransactions = onLoadMoreMonthTransactions,
+                        onLoadMoreYearTransactions = onLoadMoreYearTransactions,
+                        openMonthDetailAtTodayToken = insightOpenMonthDetailToken,
+                        onMonthDetailJumpHandled = { insightOpenMonthDetailToken = 0 },
+                        onOpenBudgetSettings = {
+                            selectedMainTab = MainTab.Profile.ordinal
+                            settingsOpenBudgetToken++
+                        }
+                    )
+                    MainTab.Profile -> SettingsTab(
+                        state = state,
+                        onAddCategory = onAddCategory,
+                        onSetMonthBudget = onSetMonthBudget,
+                        onSetCategoryBudget = onSetCategoryBudget,
+                        onExportBackup = onExportBackup,
+                        onClearSmartRules = onClearSmartRules,
+                        onImportBackup = onImportBackup,
+                        openBudgetAtToken = settingsOpenBudgetToken,
+                        onBudgetJumpHandled = { settingsOpenBudgetToken = 0 }
+                    )
+                }
             }
         }
         BottomMainTabs(
@@ -179,15 +213,16 @@ private fun BottomMainTabs(
     selectedIndex: Int,
     onSelect: (Int) -> Unit
 ) {
-    val tabSelectedColor = Color(0xFFB66F44)
-    val tabUnselectedColor = Color(0xFF7A6A5E)
-    val tabActiveBgColor = Color(0xFFF3E5D7)
-    val tabActiveStrokeColor = Color(0xFFE0C4AA)
-    BoxWithConstraints(
+    val tabSelectedColor = MaterialTheme.colorScheme.primary
+    val tabUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val tabActiveBgColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    val tabActiveStrokeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.26f)
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.98f))
-            .padding(horizontal = 6.dp, vertical = 1.dp)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.98f))
+            .navigationBarsPadding()
+            .padding(horizontal = 8.dp, vertical = 5.dp)
     ) {
         Box(
             modifier = Modifier
@@ -197,46 +232,10 @@ private fun BottomMainTabs(
                 .align(Alignment.TopStart)
         )
 
-        val itemWidth = maxWidth / tabs.size
-        val activePillHorizontalInset = 3.dp
-        val activePillWidth = itemWidth - (activePillHorizontalInset * 2)
-        val activePillHeight = 34.dp
-        val activePillX by animateDpAsState(
-            targetValue = itemWidth * selectedIndex + activePillHorizontalInset,
-            animationSpec = tween(durationMillis = 240),
-            label = "tab_active_pill_x"
-        )
-        val indicatorWidth = 20.dp
-        val indicatorX by animateDpAsState(
-            targetValue = itemWidth * selectedIndex + (itemWidth - indicatorWidth) / 2f,
-            animationSpec = tween(durationMillis = 220),
-            label = "tab_indicator_x"
-        )
-
-        Box(
-            modifier = Modifier
-                .offset(x = activePillX, y = 6.dp)
-                .width(activePillWidth)
-                .height(activePillHeight)
-                .clip(RoundedCornerShape(14.dp))
-                .background(tabActiveBgColor.copy(alpha = 0.42f))
-                .border(0.8.dp, tabActiveStrokeColor.copy(alpha = 0.52f), RoundedCornerShape(14.dp))
-        )
-
-        Box(
-            modifier = Modifier
-                .offset(x = indicatorX, y = 0.dp)
-                .width(indicatorWidth)
-                .height(2.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(tabSelectedColor.copy(alpha = 0.62f))
-        )
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(top = 3.dp)
         ) {
             tabs.forEachIndexed { index, tab ->
                 val selected = index == selectedIndex
@@ -252,49 +251,63 @@ private fun BottomMainTabs(
                     animationSpec = tween(durationMillis = 120),
                     label = "tab_press_alpha"
                 )
-                val iconLift by animateDpAsState(
-                    targetValue = if (selected) (-1).dp else 0.dp,
-                    animationSpec = tween(durationMillis = 180),
-                    label = "tab_icon_lift"
-                )
-                Column(
+                Box(
                     modifier = Modifier
                         .weight(1f)
+                        .height(62.dp)
+                        .padding(horizontal = 3.dp)
                         .graphicsLayer {
                             scaleX = scale
                             scaleY = scale
                             this.alpha = alpha
                         }
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (selected) tabActiveBgColor else Color.Transparent)
+                        .border(
+                            width = 1.dp,
+                            color = if (selected) tabActiveStrokeColor else Color.Transparent,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .semantics {
+                            role = Role.Tab
+                            this.selected = selected
+                        }
                         .clickable(
                             interactionSource = interactionSource,
-                            indication = null
+                            indication = LocalIndication.current
                         ) { onSelect(index) }
-                        .padding(vertical = 5.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = tabIcon(tab),
-                        contentDescription = tab.title,
-                        modifier = Modifier
-                            .offset(y = iconLift)
-                            .width(17.dp)
-                            .height(17.dp),
-                        tint = if (selected) tabSelectedColor else tabUnselectedColor.copy(alpha = 0.85f)
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
                     Box(
-                        modifier = Modifier.width(38.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = tab.title,
-                            color = if (selected) tabSelectedColor else tabUnselectedColor.copy(alpha = 0.9f),
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                            style = MaterialTheme.typography.labelSmall,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .width(22.dp)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (selected) tabSelectedColor.copy(alpha = 0.62f) else Color.Transparent)
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = tabIcon(tab),
+                            contentDescription = tab.title,
+                            modifier = Modifier.size(22.dp),
+                            tint = if (selected) tabSelectedColor else tabUnselectedColor.copy(alpha = 0.85f)
                         )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Box(
+                            modifier = Modifier.width(40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = tab.title,
+                                color = if (selected) tabSelectedColor else tabUnselectedColor.copy(alpha = 0.9f),
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                style = MaterialTheme.typography.labelSmall,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }
@@ -312,6 +325,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
 @Composable
 private fun HomeDashboardTab(
     state: HomeUiState,
+    onOpenRecord: () -> Unit,
     onOpenInsight: () -> Unit,
     onOpenInsightMonthCalendar: () -> Unit
 ) {
@@ -328,38 +342,34 @@ private fun HomeDashboardTab(
             categoryBudgets = state.selectedMonthCategoryBudgets
         )
     }
-    val keyAnomalies = remember(anomalies) { anomalies.take(3) }
+    val keyAnomaly = remember(anomalies) { anomalies.firstOrNull() }
+    val topCategory = remember(state.monthCategoryShare) { state.monthCategoryShare.maxByOrNull { it.amountCents } }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp)
     ) {
         item {
-            SummaryCard(
-                title = "本期结论",
+            MoneyHeroCard(
+                month = state.selectedMonth,
                 income = state.selectedMonthSummary.incomeCents,
                 expense = state.selectedMonthSummary.expenseCents,
                 balance = state.selectedMonthSummary.balanceCents,
-                highlight = true,
-                onClick = onOpenInsightMonthCalendar
+                budget = state.monthBudgetCents,
+                pendingCount = state.pendingAutoTransactions.size,
+                onRecord = onOpenRecord,
+                onOpenCalendar = onOpenInsightMonthCalendar
             )
         }
         item {
-            val budget = state.monthBudgetCents
-            if (budget != null && budget > 0L) {
-                BudgetProgressCard(
-                    expense = state.selectedMonthSummary.expenseCents,
-                    budget = budget,
-                    month = state.selectedMonth
-                )
-            } else {
-                GlassCard(tone = GlassCardTone.Warning) {
-                    Text("预算风险", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("尚未设置预算，建议先在“我的”页设置本月预算。")
-                }
-            }
+            SignalCard(
+                icon = if (keyAnomaly == null) Icons.Filled.Savings else Icons.Filled.Warning,
+                title = keyAnomaly?.title ?: "节奏正常",
+                detail = keyAnomaly?.detail ?: "本月暂无明显异常，保持自动记账和每天看一眼即可。",
+                warning = keyAnomaly != null,
+                onClick = onOpenInsight
+            )
         }
         item {
             GlassCard {
@@ -368,18 +378,22 @@ private fun HomeDashboardTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("今日流水", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "查看洞察 >",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { onOpenInsight() }
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.Receipt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("今日流水", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    }
+                    TextButton(onClick = onOpenInsight, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) { Text("更多") }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 if (state.todayTransactions.isEmpty()) {
                     Text(
-                        "今天还没有记录，记一笔会更清楚掌握消费节奏。",
+                        "今天还没有记录，点上方“记一笔”补上即可。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -395,23 +409,261 @@ private fun HomeDashboardTab(
             }
         }
         item {
-            GlassCard(modifier = Modifier.clickable { onOpenInsight() }) {
-                Text("异常提醒", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(6.dp))
-                if (keyAnomalies.isEmpty()) {
-                    Text("本月暂无明显异常，保持当前消费节奏。")
-                } else {
-                    keyAnomalies.forEach { anomaly ->
-                        Text("• ${anomaly.title}", fontWeight = FontWeight.Medium)
-                        Text(
-                            anomaly.detail,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+            TopCategoryCard(topCategory = topCategory, onOpenInsight = onOpenInsight)
+        }
+    }
+}
+
+@Composable
+private fun MoneyHeroCard(
+    month: YearMonth,
+    income: Long,
+    expense: Long,
+    balance: Long,
+    budget: Long?,
+    pendingCount: Int,
+    onRecord: () -> Unit,
+    onOpenCalendar: () -> Unit
+) {
+    val budgetRatio = if (budget != null && budget > 0L) {
+        expense.toFloat() / budget.toFloat()
+    } else {
+        0f
+    }.coerceIn(0f, 1.2f)
+    val leftBudget = budget?.let { (it - expense).coerceAtLeast(0L) }
+    val balanceColor = when {
+        balance > 0L -> SuccessColor
+        balance < 0L -> DangerColor
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(21.dp)
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    Spacer(modifier = Modifier.width(9.dp))
+                    Column {
+                        Text(
+                            text = "${month.monthValue}月钱包",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Text(
+                            text = if (pendingCount > 0) "待确认 $pendingCount 条" else "自动记账已同步",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.76f)
+                        )
+                    }
+                }
+                TextButton(onClick = onOpenCalendar, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) {
+                    Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
+                }
+            }
+
+            Column {
+                Text(
+                    text = "本月结余",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
+                )
+                Text(
+                    text = MoneyFormat.fromCents(balance),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MoneyHeroMetric("收入", MoneyFormat.fromCents(income), SuccessColor, Modifier.weight(1f))
+                MoneyHeroMetric("支出", MoneyFormat.fromCents(expense), DangerColor, Modifier.weight(1f))
+                MoneyHeroMetric("净值", MoneyFormat.fromCents(balance), balanceColor, Modifier.weight(1f))
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.11f))
+                    .padding(10.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(
+                            text = budget?.let { "预算剩余 ${MoneyFormat.fromCents(leftBudget ?: 0L)}" } ?: "还没设本月预算",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Text(
+                            text = budget?.let { "${(budgetRatio * 100).toInt()}%" } ?: "去我的页设置",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(if (budget == null) 0.18f else budgetRatio.coerceIn(0.04f, 1f))
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (budgetRatio >= 0.9f) WarningColor else MaterialTheme.colorScheme.secondary)
+                        )
                     }
                 }
             }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onRecord,
+                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
+                    shape = RoundedCornerShape(13.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary
+                    )
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("记一笔", fontWeight = FontWeight.SemiBold)
+                }
+                OutlinedButton(
+                    onClick = onOpenCalendar,
+                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
+                    shape = RoundedCornerShape(13.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.35f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Icon(Icons.Filled.Insights, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("看日历")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoneyHeroMetric(label: String, value: String, accent: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f))
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.72f))
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Bold,
+            color = accent,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun SignalCard(
+    icon: ImageVector,
+    title: String,
+    detail: String,
+    warning: Boolean,
+    onClick: () -> Unit
+) {
+    GlassCard(
+        tone = if (warning) GlassCardTone.Warning else GlassCardTone.Neutral,
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background((if (warning) WarningColor else SuccessColor).copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (warning) WarningColor else SuccessColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun TopCategoryCard(
+    topCategory: CategoryShare?,
+    onOpenInsight: () -> Unit
+) {
+    GlassCard(modifier = Modifier.clickable { onOpenInsight() }) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("本月最花钱", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(4.dp))
+                if (topCategory == null) {
+                    Text("先记几笔，系统会自动找出重点分类。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Text(
+                        "${topCategory.name} · ${MoneyFormat.fromCents(topCategory.amountCents)} · ${(topCategory.ratio * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Text("去洞察", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -677,9 +929,9 @@ private fun DaySwitcher(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedButton(onClick = onPrev) { Text("上一天") }
+            OutlinedButton(onClick = onPrev, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) { Text("上一天") }
             Text("${selectedDate.monthValue}/${selectedDate.dayOfMonth}", fontWeight = FontWeight.SemiBold)
-            OutlinedButton(onClick = onNext, enabled = canNext) { Text("下一天") }
+            OutlinedButton(onClick = onNext, enabled = canNext, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) { Text("下一天") }
         }
     }
 }
@@ -739,7 +991,12 @@ private fun CalendarCell(
         else -> Color.Transparent
     }
     Column(
-        modifier = modifier.height(54.dp).padding(2.dp).background(cellBg, RoundedCornerShape(8.dp)).clickable(enabled = date != null, onClick = onClick).padding(horizontal = 4.dp, vertical = 3.dp),
+        modifier = modifier
+            .height(58.dp)
+            .padding(2.dp)
+            .background(cellBg, RoundedCornerShape(8.dp))
+            .clickable(enabled = date != null, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 3.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Text(text = date?.dayOfMonth?.toString().orEmpty(), style = MaterialTheme.typography.bodySmall)
@@ -759,6 +1016,10 @@ internal fun PendingTransactionRow(
 ) {
     val smartTag = remember(tx.note) { parseSmartTag(tx.note) }
     val displayNote = remember(tx.note) { tx.note.replace(Regex("\\[SMART:[^\\]]+\\]"), "").trim() }
+    val sourceLabel = formatSourceLabel(tx.source)
+    val timeText = remember(tx.occurredAtEpochMs) {
+        Instant.ofEpochMilli(tx.occurredAtEpochMs).atZone(zone).format(rowTimeFormatter)
+    }
     var showNoteDialog by rememberSaveable(tx.id) { androidx.compose.runtime.mutableStateOf(false) }
     Card(
         modifier = Modifier.clickable { showNoteDialog = true },
@@ -773,7 +1034,7 @@ internal fun PendingTransactionRow(
             Text("待确认$txLabel $prefix${MoneyFormat.fromCents(tx.amountCents)}", fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = tx.source,
+                text = "来源：$sourceLabel · 时间：$timeText",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -804,7 +1065,7 @@ internal fun PendingTransactionRow(
     if (showNoteDialog) {
         NoteDetailDialog(
             title = "待确认备注",
-            source = formatSourceLabel(tx.source),
+            source = "$sourceLabel · $timeText",
             note = displayNote,
             onDismiss = { showNoteDialog = false }
         )
@@ -881,14 +1142,22 @@ private fun TransactionRow(
                         Text(
                             "调整分类",
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable { onEditCategory() }.padding(horizontal = 8.dp, vertical = 4.dp)
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onEditCategory() }
+                                .defaultMinSize(minHeight = 44.dp)
+                                .padding(horizontal = 8.dp, vertical = 10.dp)
                         )
                     }
                     if (onDelete != null) {
                         Text(
                             "删除",
                             color = DangerColor,
-                            modifier = Modifier.clickable { onDelete() }.padding(horizontal = 8.dp, vertical = 4.dp)
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onDelete() }
+                                .defaultMinSize(minHeight = 44.dp)
+                                .padding(horizontal = 8.dp, vertical = 10.dp)
                         )
                     }
                 }
@@ -1014,7 +1283,7 @@ internal fun PrimaryActionButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.defaultMinSize(minHeight = 48.dp),
         enabled = enabled,
         shape = shape,
         interactionSource = interactionSource,
@@ -1047,7 +1316,7 @@ internal fun GlassCard(
     }
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, border),
         colors = CardDefaults.cardColors(containerColor = container),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)

@@ -39,12 +39,14 @@ private val accountContextKeywords = listOf(
 )
 private val nonPaymentKeywords = listOf(
     "余额宝", "基金", "理财", "申购", "赎回", "确认成功通知", "确认金额", "确认份额", "收益", "分红", "净值", "持仓",
-    "体验金", "优惠券", "券包", "卡券", "红包", "积分", "买入成功", "卖出成功"
+    "体验金", "优惠券", "券包", "卡券", "红包", "积分", "京豆", "专属优惠", "特惠已到账", "可抵扣",
+    "领取即将截止", "快来领取", "面额", "满减券", "买入成功", "卖出成功"
 )
 
 private val hardNonPaymentKeywords = listOf(
     "余额宝", "基金", "理财", "申购", "赎回", "确认份额", "收益", "分红", "净值", "持仓",
-    "体验金", "优惠券", "券包", "卡券", "积分", "买入成功", "卖出成功"
+    "体验金", "优惠券", "券包", "卡券", "积分", "京豆", "专属优惠", "特惠已到账", "可抵扣",
+    "领取即将截止", "快来领取", "面额", "满减券", "买入成功", "卖出成功"
 )
 
 private val expenseKeywords = listOf(
@@ -247,7 +249,9 @@ private fun extractAmount(merged: String): ParsedAmount? {
     currencyAnchoredAmountRegex.findAll(merged).forEach { match ->
         val raw = match.groupValues.getOrNull(1).orEmpty()
         val parsed = parseRawAmount(raw) ?: return@forEach
-        if (!isLikelyAccountNumber(merged, raw, match.range.first)) {
+        if (!isLikelyAccountNumber(merged, raw, match.range.first) &&
+            !isLikelyNonMoneyNumber(merged, raw, match.range.first)
+        ) {
             return ParsedAmount(parsed.cents, parsed.hasMinusSign)
         }
     }
@@ -307,6 +311,7 @@ private fun scoreAmountCandidate(merged: String, candidate: AmountCandidate): In
     if (amountContextKeywords.any { context.contains(it, ignoreCase = true) }) score += 5
     if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) score += 2
     if (isLikelyAccountNumber(merged, candidate.raw, candidate.index)) score -= 12
+    if (isLikelyNonMoneyNumber(merged, candidate.raw, candidate.index)) score -= 16
     if (candidate.cents >= 1_000_000 && !hasDecimal) score -= 2
     return score
 }
@@ -319,6 +324,29 @@ private fun isLikelyAccountNumber(merged: String, rawValue: String, index: Int):
     if (context.contains("@") && onlyDigits.length in 3..6) return true
     if (onlyDigits.length in 3..4 && context.contains("信用卡", ignoreCase = true)) return true
     return false
+}
+
+private fun isLikelyNonMoneyNumber(merged: String, rawValue: String, index: Int): Boolean {
+    val trimmed = rawValue.trim()
+    val before = merged.getOrNull(index - 1)
+    val after = merged.getOrNull(index + rawValue.length)
+    val context = window(merged, index, rawValue.length, 8)
+    val onlyDigits = trimmed.filter { it.isDigit() }
+    val hasMoneyContext = amountContextKeywords.any { context.contains(it, ignoreCase = true) } || hasMoneyHint(context)
+    val hasCurrencyPrefix = trimmed.startsWith("¥") ||
+        trimmed.startsWith("￥") ||
+        trimmed.startsWith("RMB", ignoreCase = true) ||
+        trimmed.startsWith("CNY", ignoreCase = true)
+
+    if (after in listOf('%', '％', '折', '条', '张', '个', '件', '次', '号', '期')) return true
+    if (after in listOf('g', 'G', 'm', 'M') && onlyDigits.length <= 4) return true
+    if (before?.isAsciiLetterOrDigit() == true || after?.isAsciiLetterOrDigit() == true) return true
+    if (hasCurrencyPrefix || hasMoneyContext) return false
+    return false
+}
+
+private fun Char.isAsciiLetterOrDigit(): Boolean {
+    return this in 'A'..'Z' || this in 'a'..'z' || this in '0'..'9'
 }
 
 private fun window(source: String, index: Int, len: Int, radius: Int): String {

@@ -7,29 +7,39 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Orange500,
-    onPrimary = Snow,
+    primary = Mint200,
+    onPrimary = Ink,
     secondary = Amber500,
-    onSecondary = Snow,
-    background = Color(0xFF2D1C10),
-    onBackground = Color(0xFFFFE9D0),
-    surface = Color(0xFF3A2515),
-    onSurface = Color(0xFFFFE9D0),
-    surfaceVariant = Color(0xFF5C3A24),
-    onSurfaceVariant = Color(0xFFE7C9A8)
+    onSecondary = Ink,
+    tertiary = Orange500,
+    onTertiary = Snow,
+    background = Color(0xFF101820),
+    onBackground = Color(0xFFE8F0EF),
+    surface = Color(0xFF18242D),
+    onSurface = Color(0xFFE8F0EF),
+    surfaceVariant = Color(0xFF253947),
+    onSurfaceVariant = Color(0xFFC2CED2),
+    outline = Color(0xFF586B76),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005)
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Orange500,
+    primary = Teal700,
     onPrimary = Snow,
-    secondary = Amber500,
-    onSecondary = Snow,
-    background = Cream50,
+    secondary = Mint200,
+    onSecondary = Navy800,
+    tertiary = Amber500,
+    onTertiary = Ink,
+    background = Cloud50,
     onBackground = Ink,
-    surface = Cream100,
+    surface = Color.White,
     onSurface = Ink,
-    surfaceVariant = Sand200,
-    onSurfaceVariant = Brown500
+    surfaceVariant = Mist100,
+    onSurfaceVariant = Slate600,
+    outline = Color(0xFFB8C5C2),
+    error = Color(0xFFB3261E),
+    onError = Color.White
 )
 
 @Composable

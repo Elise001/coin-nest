@@ -72,4 +72,40 @@ class PaymentNotificationParserTest {
 
         assertNull(parsed)
     }
+
+    @Test
+    fun `ignore wechat refund notice count without real amount`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.tencent.mm",
+            title = "微信支付",
+            text = "[2条]微信支付: 退款到账通知",
+            postTime = 1_710_001_300_000
+        )
+
+        assertNull(parsed)
+    }
+
+    @Test
+    fun `ignore jd beans notice and product model numbers`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.jingdong.app.mall",
+            title = "京东通知",
+            text = "您的京豆已到账【领取即将截止】【九号（Ninebot）远航家 M85C 电动...】可抵扣",
+            postTime = 1_710_001_400_000
+        )
+
+        assertNull(parsed)
+    }
+
+    @Test
+    fun `ignore jd promotion percent and product size numbers`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.jingdong.app.mall",
+            title = "京东通知",
+            text = "您的专属优惠【希川科颜20%王二酸凝胶祛痘精华霜15g...】特惠已到账，快来领取！",
+            postTime = 1_710_001_500_000
+        )
+
+        assertNull(parsed)
+    }
 }

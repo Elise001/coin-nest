@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +38,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -257,9 +262,15 @@ internal fun InsightTab(
                 item {
                     GlassCard {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedButton(onClick = { selectedWeekStart = selectedWeekStart.minusWeeks(1) }) { Text("上周") }
+                            OutlinedButton(
+                                onClick = { selectedWeekStart = selectedWeekStart.minusWeeks(1) },
+                                modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+                            ) { Text("上周") }
                             Text("${selectedWeekStart.monthValue}/${selectedWeekStart.dayOfMonth} - ${selectedWeekStart.plusDays(6).monthValue}/${selectedWeekStart.plusDays(6).dayOfMonth}", fontWeight = FontWeight.SemiBold)
-                            OutlinedButton(onClick = { selectedWeekStart = selectedWeekStart.plusWeeks(1) }) { Text("下周") }
+                            OutlinedButton(
+                                onClick = { selectedWeekStart = selectedWeekStart.plusWeeks(1) },
+                                modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+                            ) { Text("下周") }
                         }
                     }
                 }
@@ -318,9 +329,15 @@ internal fun InsightTab(
                 item {
                     GlassCard {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedButton(onClick = { onSelectMonth(selectedMonth.minusMonths(1)) }) { Text("上月") }
+                            OutlinedButton(
+                                onClick = { onSelectMonth(selectedMonth.minusMonths(1)) },
+                                modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+                            ) { Text("上月") }
                             Text("${selectedMonth.year}年${selectedMonth.monthValue}月", fontWeight = FontWeight.SemiBold)
-                            OutlinedButton(onClick = { onSelectMonth(selectedMonth.plusMonths(1)) }) { Text("下月") }
+                            OutlinedButton(
+                                onClick = { onSelectMonth(selectedMonth.plusMonths(1)) },
+                                modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+                            ) { Text("下月") }
                         }
                     }
                 }
@@ -371,9 +388,15 @@ internal fun InsightTab(
                 item {
                     GlassCard {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedButton(onClick = { onSelectMonth(YearMonth.of(selectedMonth.year - 1, selectedMonth.monthValue)) }) { Text("上一年") }
+                            OutlinedButton(
+                                onClick = { onSelectMonth(YearMonth.of(selectedMonth.year - 1, selectedMonth.monthValue)) },
+                                modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+                            ) { Text("上一年") }
                             Text("${selectedMonth.year} 年分析", fontWeight = FontWeight.SemiBold)
-                            OutlinedButton(onClick = { onSelectMonth(YearMonth.of(selectedMonth.year + 1, selectedMonth.monthValue)) }) { Text("下一年") }
+                            OutlinedButton(
+                                onClick = { onSelectMonth(YearMonth.of(selectedMonth.year + 1, selectedMonth.monthValue)) },
+                                modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+                            ) { Text("下一年") }
                         }
                     }
                 }
@@ -725,12 +748,21 @@ private fun AchievementMotivationCard(feedback: RetentionFeedbackState) {
 @Composable
 private fun InsightEntryCard(title: String, subtitle: String, onClick: () -> Unit) {
     GlassCard {
-        Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }, horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .semantics { role = Role.Button }
+                .clickable { onClick() }
+                .padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(">", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -745,7 +777,14 @@ private fun InsightBarTrendCard(title: String, points: List<TrendPoint>) {
             return@GlassCard
         }
         val max = points.maxOf { it.expenseCents }.coerceAtLeast(1L)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+        val chartSummary = points.takeLast(12).joinToString("，") { "${it.label}支出${MoneyFormat.fromCents(it.expenseCents)}" }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "$title：$chartSummary" },
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
             points.takeLast(12).forEach { p ->
                 val ratio = (p.expenseCents.toFloat() / max.toFloat()).coerceIn(0f, 1f)
                 Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -776,7 +815,15 @@ private fun InsightPieCard(title: String, shares: List<CategoryShare>) {
             Text("暂无分类数据")
             return@GlassCard
         }
-        Canvas(modifier = Modifier.fillMaxWidth().height(150.dp)) {
+        val topShareSummary = shares.take(5).joinToString("，") {
+            "${it.name}${(it.ratio * 100).roundToInt()}%"
+        }
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+                .semantics { contentDescription = "$title：$topShareSummary" }
+        ) {
             val diameter = size.minDimension * 0.75f
             val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
             var start = -90f
@@ -852,6 +899,12 @@ private fun InsightMonthCalendarCard(
                                     else -> Color.Transparent
                                 }
                             )
+                            .semantics {
+                                if (date != null) {
+                                    role = Role.Button
+                                    contentDescription = "${date.monthValue}月${date.dayOfMonth}日，支出${MoneyFormat.fromCents(expenseCents)}"
+                                }
+                            }
                             .clickable(enabled = date != null) { if (date != null) onSelectDate(date) },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.SpaceBetween
@@ -897,7 +950,9 @@ private fun InsightTransactionRow(tx: TransactionEntity, onDelete: () -> Unit) {
                     )
                 }
             }
-            Text("删除", color = DangerColor, modifier = Modifier.clickable { onDelete() })
+            TextButton(onClick = onDelete, modifier = Modifier.defaultMinSize(minHeight = 44.dp)) {
+                Text("删除", color = DangerColor)
+            }
         }
     }
     if (showNoteDialog) {

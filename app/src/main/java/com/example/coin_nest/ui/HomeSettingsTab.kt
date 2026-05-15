@@ -16,6 +16,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -306,12 +307,12 @@ internal fun SettingsTab(
                             healthy = autoBookHealth.healthy
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = if (showAutoBookDiagnostics) "收起诊断详情" else "展开诊断详情",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable { showAutoBookDiagnostics = !showAutoBookDiagnostics }
-                        )
+                        TextButton(
+                            onClick = { showAutoBookDiagnostics = !showAutoBookDiagnostics },
+                            modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+                        ) {
+                            Text(if (showAutoBookDiagnostics) "收起诊断详情" else "展开诊断详情")
+                        }
                         if (showAutoBookDiagnostics) {
                             Spacer(modifier = Modifier.height(6.dp))
                             autoBookHealth.diagnostics.take(4).forEach { hint ->
@@ -700,12 +701,12 @@ private fun CompactSmartLearningCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("智能分类学习", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text(
-                "查看详情 >",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clickable { onOpenDetail() }
-            )
+            TextButton(
+                onClick = onOpenDetail,
+                modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+            ) {
+                Text("查看详情")
+            }
         }
         Spacer(modifier = Modifier.height(8.dp))
         Text(
@@ -895,7 +896,7 @@ private fun ProfileEntryCard(
                 Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(">", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), fontWeight = FontWeight.SemiBold)
+            Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), fontWeight = FontWeight.SemiBold)
         }
     }
 }
