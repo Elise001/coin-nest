@@ -108,4 +108,54 @@ class PaymentNotificationParserTest {
 
         assertNull(parsed)
     }
+
+    @Test
+    fun `prefer paid amount over original price and discount on alipay success page`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.eg.android.AlipayGphone",
+            title = "支付宝",
+            text = "支付宝 支付成功 回首页 ￥ 12.70 获得森林能量 柒一拾壹（北京）有限公司 ￥12.80 碰一下立减 -￥0.10 付款方式",
+            postTime = 1_716_000_000_000
+        )
+
+        assertNotNull(parsed)
+        assertEquals(1270L, parsed!!.amountCents)
+        assertEquals(TransactionType.EXPENSE, parsed.type)
+    }
+
+    @Test
+    fun `ignore jd cash reminder duration without real amount`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.jingdong.app.mall",
+            title = "京东通知",
+            text = "【提现提醒】您的现金打款已于24小时前到账，尚未处理，将于23:59过期，请及时",
+            postTime = 1_716_000_000_000
+        )
+
+        assertNull(parsed)
+    }
+
+    @Test
+    fun `ignore taobao unclaimed coupon amount`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.taobao.taobao",
+            title = "淘宝通知",
+            text = "您有485元88VIP消费券还未领取 开通88VIP即可领取，立即查看>>",
+            postTime = 1_716_000_000_000
+        )
+
+        assertNull(parsed)
+    }
+
+    @Test
+    fun `ignore jd subsidy ad popup amount`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.jingdong.app.mall",
+            title = "京东通知",
+            text = "你好 已到账: [1000.0元补贴]",
+            postTime = 1_716_000_000_000
+        )
+
+        assertNull(parsed)
+    }
 }

@@ -39,14 +39,22 @@ private val accountContextKeywords = listOf(
 )
 private val nonPaymentKeywords = listOf(
     "余额宝", "基金", "理财", "申购", "赎回", "确认成功通知", "确认金额", "确认份额", "收益", "分红", "净值", "持仓",
-    "体验金", "优惠券", "券包", "卡券", "红包", "积分", "京豆", "专属优惠", "特惠已到账", "可抵扣",
-    "领取即将截止", "快来领取", "面额", "满减券", "买入成功", "卖出成功"
+    "体验金", "优惠券", "消费券", "券包", "卡券", "红包", "积分", "京豆", "专属优惠", "特惠已到账", "可抵扣",
+    "领取即将截止", "快来领取", "还未领取", "未领取", "面额", "满减券", "补贴", "买入成功", "卖出成功"
 )
 
 private val hardNonPaymentKeywords = listOf(
     "余额宝", "基金", "理财", "申购", "赎回", "确认份额", "收益", "分红", "净值", "持仓",
-    "体验金", "优惠券", "券包", "卡券", "积分", "京豆", "专属优惠", "特惠已到账", "可抵扣",
-    "领取即将截止", "快来领取", "面额", "满减券", "买入成功", "卖出成功"
+    "体验金", "优惠券", "消费券", "券包", "卡券", "积分", "京豆", "专属优惠", "特惠已到账", "可抵扣",
+    "领取即将截止", "快来领取", "还未领取", "未领取", "面额", "满减券", "补贴", "买入成功", "卖出成功"
+)
+
+private val preferredPaymentAmountContextKeywords = listOf(
+    "实付", "支付金额", "付款金额", "本次支付", "需支付", "支付成功", "付款成功", "成功付款"
+)
+
+private val discountAmountContextKeywords = listOf(
+    "优惠", "立减", "减免", "抵扣", "满减", "券", "红包", "原价", "折扣"
 )
 
 private val expenseKeywords = listOf(
@@ -246,16 +254,6 @@ private fun suggestCategory(merged: String, type: TransactionType): Pair<String,
 }
 
 private fun extractAmount(merged: String): ParsedAmount? {
-    currencyAnchoredAmountRegex.findAll(merged).forEach { match ->
-        val raw = match.groupValues.getOrNull(1).orEmpty()
-        val parsed = parseRawAmount(raw) ?: return@forEach
-        if (!isLikelyAccountNumber(merged, raw, match.range.first) &&
-            !isLikelyNonMoneyNumber(merged, raw, match.range.first)
-        ) {
-            return ParsedAmount(parsed.cents, parsed.hasMinusSign)
-        }
-    }
-
     val candidates = amountRegex.findAll(merged).mapNotNull { match ->
         val raw = match.value.trim()
         if (!raw.any { it.isDigit() }) return@mapNotNull null
@@ -301,6 +299,7 @@ private fun parseRawAmount(raw: String): ParsedRawAmount? {
 private fun scoreAmountCandidate(merged: String, candidate: AmountCandidate): Int {
     var score = 0
     val context = window(merged, candidate.index, candidate.raw.length, 14)
+    val widerContext = window(merged, candidate.index, candidate.raw.length, 24)
     val hasDecimal = candidate.normalized.contains(".")
     if (candidate.raw.contains("¥") || candidate.raw.contains("￥") ||
         candidate.raw.contains("RMB", ignoreCase = true) || candidate.raw.contains("CNY", ignoreCase = true)
@@ -309,6 +308,8 @@ private fun scoreAmountCandidate(merged: String, candidate: AmountCandidate): In
     }
     if (hasDecimal) score += 6
     if (amountContextKeywords.any { context.contains(it, ignoreCase = true) }) score += 5
+    if (preferredPaymentAmountContextKeywords.any { widerContext.contains(it, ignoreCase = true) }) score += 8
+    if (discountAmountContextKeywords.any { widerContext.contains(it, ignoreCase = true) }) score -= 14
     if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) score += 2
     if (isLikelyAccountNumber(merged, candidate.raw, candidate.index)) score -= 12
     if (isLikelyNonMoneyNumber(merged, candidate.raw, candidate.index)) score -= 16
@@ -338,7 +339,8 @@ private fun isLikelyNonMoneyNumber(merged: String, rawValue: String, index: Int)
         trimmed.startsWith("RMB", ignoreCase = true) ||
         trimmed.startsWith("CNY", ignoreCase = true)
 
-    if (after in listOf('%', '％', '折', '条', '张', '个', '件', '次', '号', '期')) return true
+    if (before in listOf(':', '：') || after in listOf(':', '：')) return true
+    if (after in listOf('%', '％', '折', '条', '张', '个', '件', '次', '号', '期', '小', '时', '天', '分', '秒')) return true
     if (after in listOf('g', 'G', 'm', 'M') && onlyDigits.length <= 4) return true
     if (before?.isAsciiLetterOrDigit() == true || after?.isAsciiLetterOrDigit() == true) return true
     if (hasCurrencyPrefix || hasMoneyContext) return false

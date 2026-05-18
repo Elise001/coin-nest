@@ -2,7 +2,6 @@ package com.example.coin_nest.autobook
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -138,6 +137,7 @@ class PaymentAccessibilityService : AccessibilityService() {
                             source = parsed.source,
                             note = parsed.note
                         )
+                        showAutoDetectedToast()
                         debugPopup("无障碍记账成功")
                     }
                     else -> {
@@ -242,18 +242,17 @@ class PaymentAccessibilityService : AccessibilityService() {
     }
 
     private fun debugPopup(message: String) {
-        if (!isDebuggable()) return
+        Log.d("AutoBookDebug", message)
+    }
+
+    private fun showAutoDetectedToast() {
         val now = System.currentTimeMillis()
         if (now - lastToastMs < 1500L) return
         lastToastMs = now
         mainHandler.post {
             runCatching {
-                Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, "自动记账已识别，已放入待确认", Toast.LENGTH_SHORT).show()
             }
         }
-    }
-
-    private fun isDebuggable(): Boolean {
-        return applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     }
 }
