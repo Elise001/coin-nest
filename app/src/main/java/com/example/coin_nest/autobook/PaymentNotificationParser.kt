@@ -7,10 +7,6 @@ private val amountRegex = Regex(
     "[+\\-−]?\\s*(?:[¥￥]|RMB|CNY)?\\s*\\d{1,7}(?:[\\.,]\\d{1,2})?",
     RegexOption.IGNORE_CASE
 )
-private val currencyAnchoredAmountRegex = Regex(
-    "(?:[¥￥]|RMB|CNY)\\s*([+\\-−]?\\s*\\d{1,7}(?:[\\.,]\\d{1,2})?)",
-    RegexOption.IGNORE_CASE
-)
 
 private val supportedPackages = mapOf(
     "com.eg.android.AlipayGphone" to "ALIPAY",
@@ -37,18 +33,6 @@ private val amountContextKeywords = listOf(
 private val accountContextKeywords = listOf(
     "尾号", "账号", "账户", "卡号", "末四位", "后四位", "邮箱", "手机号", "@", "***", "****"
 )
-private val nonPaymentKeywords = listOf(
-    "余额宝", "基金", "理财", "申购", "赎回", "确认成功通知", "确认金额", "确认份额", "收益", "分红", "净值", "持仓",
-    "体验金", "优惠券", "消费券", "券包", "卡券", "红包", "积分", "京豆", "专属优惠", "特惠已到账", "可抵扣",
-    "领取即将截止", "快来领取", "还未领取", "未领取", "面额", "满减券", "补贴", "买入成功", "卖出成功"
-)
-
-private val hardNonPaymentKeywords = listOf(
-    "余额宝", "基金", "理财", "申购", "赎回", "确认份额", "收益", "分红", "净值", "持仓",
-    "体验金", "优惠券", "消费券", "券包", "卡券", "积分", "京豆", "专属优惠", "特惠已到账", "可抵扣",
-    "领取即将截止", "快来领取", "还未领取", "未领取", "面额", "满减券", "补贴", "买入成功", "卖出成功"
-)
-
 private val preferredPaymentAmountContextKeywords = listOf(
     "实付", "支付金额", "付款金额", "本次支付", "需支付", "支付成功", "付款成功", "成功付款"
 )
@@ -71,11 +55,6 @@ private val transferOutKeywords = listOf(
 
 private val transferInKeywords = listOf(
     "转入", "转账收入", "转账到账", "收款到账"
-)
-
-private val noiseKeywords = listOf(
-    "验证码", "口令", "待支付", "广告", "活动", "账单助手",
-    "条新消息", "群聊", "内部群", "拍了拍", "@你", "语音通话", "视频通话"
 )
 
 private val transactionRefRegexes = listOf(
@@ -125,7 +104,13 @@ object PaymentNotificationParser {
         return parseWithDebug(packageName, title, text, postTime).payment
     }
 
-    fun parseWithDebug(packageName: String?, title: String?, text: String?, postTime: Long): PaymentParseDebugResult {
+    fun parseWithDebug(
+        packageName: String?,
+        title: String?,
+        text: String?,
+        postTime: Long,
+        aiDecisionOverride: AutoBookAiDecision? = null
+    ): PaymentParseDebugResult {
         if (!isSupportedPackage(packageName)) {
             return PaymentParseDebugResult(null, "非支付渠道包名: ${packageName ?: "null"}")
         }
@@ -135,14 +120,9 @@ object PaymentNotificationParser {
             .replace(Regex("\\s+"), " ")
             .trim()
         if (merged.isBlank()) return PaymentParseDebugResult(null, "空通知内容")
-        if (noiseKeywords.any { merged.contains(it, ignoreCase = true) }) {
-            return PaymentParseDebugResult(null, "命中噪声关键词")
-        }
-        if (looksLikeNonPaymentConfirmation(merged)) {
-            return PaymentParseDebugResult(null, "非支付确认类通知")
-        }
-        if (!looksLikeTransaction(merged)) {
-            return PaymentParseDebugResult(null, "非支付交易通知")
+        val aiDecision = aiDecisionOverride ?: AutoBookAiDecisionLayer.assess(packageName, merged)
+        if (!aiDecision.accepted) {
+            return PaymentParseDebugResult(null, "AI决策拒绝：${aiDecision.reason}，可信度 ${aiDecision.confidence}")
         }
 
         val amountMatch = extractAmount(merged)
@@ -175,20 +155,6 @@ object PaymentNotificationParser {
             reason = "解析成功"
         )
     }
-}
-
-private fun looksLikeTransaction(merged: String): Boolean {
-    if (hardNonPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) return false
-    if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) return true
-    if (transactionKeywords.any { merged.contains(it, ignoreCase = true) }) return true
-    return currencyAnchoredAmountRegex.containsMatchIn(merged)
-}
-
-private fun looksLikeNonPaymentConfirmation(merged: String): Boolean {
-    if (hardNonPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) return true
-    val hitNonPayment = nonPaymentKeywords.any { merged.contains(it, ignoreCase = true) }
-    if (!hitNonPayment) return false
-    return strongPaymentKeywords.none { merged.contains(it, ignoreCase = true) }
 }
 
 private fun inferSource(packageName: String?, merged: String): String {

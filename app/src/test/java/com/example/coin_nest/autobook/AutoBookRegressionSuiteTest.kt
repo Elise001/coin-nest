@@ -4,7 +4,6 @@ import com.example.coin_nest.data.AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS
 import com.example.coin_nest.data.AUTO_CHANNEL_WINDOW_DUPLICATE_MS
 import com.example.coin_nest.data.AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS
 import com.example.coin_nest.data.isWithinAutoSameSourceWindow
-import com.example.coin_nest.data.shouldDedupeByAutoChannel
 import com.example.coin_nest.data.model.TransactionType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -86,7 +85,8 @@ class AutoBookRegressionSuiteTest {
         )
 
         assertNull(result.payment)
-        assertTrue(result.reason.contains("非支付确认类通知"))
+        assertTrue(result.reason.contains("AI决策拒绝"))
+        assertTrue(result.reason.contains("理财或资产变动"))
     }
 
     @Test
@@ -102,16 +102,7 @@ class AutoBookRegressionSuiteTest {
     @Test
     fun `auto dedupe windows should separate channel and cross source tolerance`() {
         assertEquals(60_000L, AUTO_CHANNEL_WINDOW_DUPLICATE_MS)
-        assertEquals(90_000L, AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS)
+        assertEquals(180_000L, AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS)
         assertEquals(AUTO_CHANNEL_WINDOW_DUPLICATE_MS, AUTO_SAME_SOURCE_WINDOW_DUPLICATE_MS)
-    }
-
-    @Test
-    fun `channel dedupe should work across and within auto channels`() {
-        assertTrue(shouldDedupeByAutoChannel("NOTIFY", "ACCESS"))
-        assertTrue(shouldDedupeByAutoChannel("ACCESS", "NOTIFY"))
-        assertTrue(shouldDedupeByAutoChannel("NOTIFY", "NOTIFY"))
-        assertTrue(shouldDedupeByAutoChannel("ACCESS", "ACCESS"))
-        assertTrue(!shouldDedupeByAutoChannel("MANUAL", "ACCESS"))
     }
 }

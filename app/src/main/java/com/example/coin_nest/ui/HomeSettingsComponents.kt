@@ -436,7 +436,7 @@ private fun auditReasonLabel(reason: String): String {
     return when {
         upper.contains("AUTO_DUPLICATE_BY_WINDOW") -> "短时间重复，已忽略"
         upper.contains("SAME_SOURCE_DUPLICATE_BY_TXN_REF") -> "同交易号重复，已忽略"
-        upper.contains("CROSS_SOURCE_LINKED") -> "跨渠道重复，已合并"
+        upper.contains("AI_RELATED_LINKED") || upper.contains("CROSS_SOURCE_LINKED") -> "跨渠道重复，已合并"
         upper.contains("NON") || reason.contains("非支付") -> reason.take(32)
         upper.contains("INSERTED") -> "进入待确认"
         upper.contains("PARSE") || reason.contains("未提取") || reason.contains("无法判断") -> reason.take(32)

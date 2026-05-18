@@ -249,7 +249,7 @@ class PaymentNotificationListener : NotificationListenerService() {
             upper.contains("SAME_SOURCE_DUPLICATE_BY_TXN_REF") -> "同源重复（同交易号）"
             upper.contains("AUTO_DUPLICATE_BY_WINDOW") -> "短时间重复自动记账"
             upper.contains("DUPLICATE_OR_CONFLICT") -> "重复或数据库冲突"
-            upper.contains("CROSS_SOURCE_LINKED") -> "跨渠道关联（已合并）"
+            upper.contains("AI_RELATED_LINKED") || upper.contains("CROSS_SOURCE_LINKED") -> "跨渠道关联（已合并）"
             upper.contains("INSERTED") -> "已入库"
             upper.contains("命中噪声关键词") -> "命中噪声关键词"
             upper.contains("未提取到有效金额") -> "未提取到有效金额"

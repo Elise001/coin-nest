@@ -399,7 +399,7 @@ private fun toChineseReason(raw: String): String {
     return when {
         reason.contains("SAME_SOURCE_DUPLICATE_BY_TXN_REF") -> "同源重复（同交易号）"
         reason.contains("DUPLICATE_OR_CONFLICT") -> "重复或数据库冲突"
-        reason.contains("CROSS_SOURCE_LINKED") -> "跨渠道关联（已合并）"
+        reason.contains("AI_RELATED_LINKED") || reason.contains("CROSS_SOURCE_LINKED") -> "跨渠道关联（已合并）"
         reason.contains("INSERTED") -> "已入库"
         reason.contains("PARSE") -> "通知解析失败"
         reason.contains("LISTENER") -> "监听服务异常"

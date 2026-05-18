@@ -25,14 +25,6 @@ class PaymentAccessibilityService : AccessibilityService() {
         "com.eg.android.AlipayGphone",
         "com.tencent.mm"
     )
-    private val successKeywords = listOf(
-        "支付成功", "付款成功", "交易成功", "已支付", "成功支付", "支付完成"
-    )
-    private val nonPaymentKeywords = listOf(
-        "余额宝", "基金", "理财", "申购", "赎回", "收益", "确认金额", "确认份额", "买入成功",
-        "卖出成功", "优惠券", "券包", "卡券", "红包", "积分", "分红", "净值", "持仓", "体验金"
-    )
-
     // 防抖窗口：屏蔽同一页面短时间重复 Accessibility 回调
     private val rawSnapshotWindowMs = 2_500L
     // 页面级去重窗口：防止同一笔成功页在短时间内连续入库
@@ -62,8 +54,16 @@ class PaymentAccessibilityService : AccessibilityService() {
         runCatching {
             val merged = buildMergedContent(event, rootInActiveWindow)
             if (merged.isBlank()) return
-            if (!looksLikePaymentSuccess(merged)) return
-            if (looksLikeNonPayment(merged)) return
+            val aiDecision = AutoBookAiDecisionLayer.assess(pkg, merged)
+            if (!aiDecision.accepted) {
+                AutoBookTelemetry.track(
+                    applicationContext,
+                    event = "accessibility_drop",
+                    packageName = pkg,
+                    reason = "AI_${aiDecision.kind}_${aiDecision.confidence}"
+                )
+                return
+            }
 
             val eventClass = event.className?.toString().orEmpty()
             if (isDuplicateRawSnapshot(pkg, eventClass, merged)) {
@@ -87,7 +87,8 @@ class PaymentAccessibilityService : AccessibilityService() {
                 packageName = pkg,
                 title = eventClass,
                 text = merged,
-                postTime = System.currentTimeMillis()
+                postTime = System.currentTimeMillis(),
+                aiDecisionOverride = aiDecision
             )
             val parsed = parsedResult.payment ?: run {
                 AutoBookTelemetry.track(
@@ -169,14 +170,6 @@ class PaymentAccessibilityService : AccessibilityService() {
         AutoBookTelemetry.track(applicationContext, event = "accessibility_destroy")
         scope.cancel()
         super.onDestroy()
-    }
-
-    private fun looksLikePaymentSuccess(text: String): Boolean {
-        return successKeywords.any { text.contains(it, ignoreCase = true) }
-    }
-
-    private fun looksLikeNonPayment(text: String): Boolean {
-        return nonPaymentKeywords.any { text.contains(it, ignoreCase = true) }
     }
 
     private fun buildMergedContent(event: AccessibilityEvent, root: AccessibilityNodeInfo?): String {

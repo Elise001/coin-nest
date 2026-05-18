@@ -154,7 +154,7 @@ class CoinNestRepository(context: Context) {
             "工作日" to "日常",
             "休息日" to "餐饮",
             "休息日" to "出行",
-            "休息日" to "日",
+            "休息日" to "日常",
             "医疗" to "门诊药品",
             "医疗" to "体检护理",
             "网购" to "日常网购",
@@ -399,15 +399,16 @@ class CoinNestRepository(context: Context) {
         }
 
         // Cross-source dedupe: payment apps and bank/card notices often describe the same payment.
-        val linkedAnchorId = findCrossSourceAnchorId(
+        val linkedAnchor = findCrossSourceAnchor(
             amountCents = amountCents,
             type = autoType,
             source = source,
+            channel = channel,
             occurredAtEpochMs = occurredAt
         )
-        val finalStatus = if (linkedAnchorId != null) STATUS_LINKED_DUPLICATE else STATUS_PENDING
-        val finalNote = if (linkedAnchorId != null) {
-            "$note [跨源关联->#$linkedAnchorId]"
+        val finalStatus = if (linkedAnchor != null) STATUS_LINKED_DUPLICATE else STATUS_PENDING
+        val finalNote = if (linkedAnchor != null) {
+            "$note [AI关联->#${linkedAnchor.id}:${linkedAnchor.reason}:${linkedAnchor.confidence}]"
         } else {
             note
         }
@@ -455,8 +456,8 @@ class CoinNestRepository(context: Context) {
             notifyChanged()
             AutoTransactionInsertResult(
                 insertedId = insertedId,
-                reason = if (linkedAnchorId != null) "CROSS_SOURCE_LINKED" else "INSERTED",
-                shouldNotify = linkedAnchorId == null
+                reason = if (linkedAnchor != null) "AI_RELATED_LINKED" else "INSERTED",
+                shouldNotify = linkedAnchor == null
             )
         } else {
             AutoTransactionInsertResult(
@@ -481,19 +482,23 @@ class CoinNestRepository(context: Context) {
         return cursor.use { it.moveToFirst() }
     }
 
-    private fun findCrossSourceAnchorId(
+    private data class LinkedAnchor(
+        val id: Long,
+        val reason: String,
+        val confidence: Int
+    )
+
+    private fun findCrossSourceAnchor(
         amountCents: Long,
         type: String,
         source: String,
+        channel: String,
         occurredAtEpochMs: Long
-    ): Long? {
-        val normalizedSource = source.uppercase()
-        val counterpartSources = counterpartSourceSet(normalizedSource)
-        if (counterpartSources.isEmpty()) return null
+    ): LinkedAnchor? {
         val windowMs = AUTO_CROSS_SOURCE_WINDOW_DUPLICATE_MS
         val cursor = dbHelper.readableDatabase.rawQuery(
             """
-            SELECT id, source
+            SELECT id, source, tag, occurred_at_epoch_ms
             FROM transactions
             WHERE amount_cents = ?
               AND type = ?
@@ -514,19 +519,25 @@ class CoinNestRepository(context: Context) {
         return cursor.use { c ->
             while (c.moveToNext()) {
                 val candidateSource = c.getString(c.getColumnIndexOrThrow("source")).orEmpty().uppercase()
-                if (counterpartSources.contains(candidateSource)) {
-                    return@use c.getLong(c.getColumnIndexOrThrow("id"))
+                val candidateTag = c.getString(c.getColumnIndexOrThrow("tag")).orEmpty()
+                val candidateChannel = candidateTag.removePrefix("AUTO_CH_").uppercase()
+                val candidateOccurredAt = c.getLong(c.getColumnIndexOrThrow("occurred_at_epoch_ms"))
+                val decision = AutoBookMergeScorer.decide(
+                    existingSource = candidateSource,
+                    incomingSource = source,
+                    existingChannel = candidateChannel,
+                    incomingChannel = channel,
+                    timeDiffMs = candidateOccurredAt - occurredAtEpochMs
+                )
+                if (decision.action == AutoBookMergeAction.LINK_RELATED) {
+                    return@use LinkedAnchor(
+                        id = c.getLong(c.getColumnIndexOrThrow("id")),
+                        reason = decision.reason,
+                        confidence = decision.confidence
+                    )
                 }
             }
             null
-        }
-    }
-
-    private fun counterpartSourceSet(source: String): Set<String> {
-        return when (source.uppercase()) {
-            "BANK_CARD", "CREDIT_CARD", "UNIONPAY" -> setOf("ALIPAY", "WECHAT")
-            "ALIPAY", "WECHAT" -> setOf("BANK_CARD", "CREDIT_CARD", "UNIONPAY")
-            else -> emptySet()
         }
     }
 
@@ -540,7 +551,7 @@ class CoinNestRepository(context: Context) {
         val normalizedChannel = channel.uppercase()
         val cursor = dbHelper.readableDatabase.rawQuery(
             """
-            SELECT tag
+            SELECT tag, occurred_at_epoch_ms
             FROM transactions
             WHERE amount_cents = ?
               AND type = ?
@@ -566,7 +577,15 @@ class CoinNestRepository(context: Context) {
             while (c.moveToNext()) {
                 val tag = c.getString(c.getColumnIndexOrThrow("tag")).orEmpty()
                 val existingChannel = tag.removePrefix("AUTO_CH_").uppercase()
-                if (shouldDedupeByAutoChannel(existingChannel, normalizedChannel)) {
+                val existingOccurredAt = c.getLong(c.getColumnIndexOrThrow("occurred_at_epoch_ms"))
+                val decision = AutoBookMergeScorer.decide(
+                    existingSource = source,
+                    incomingSource = source,
+                    existingChannel = existingChannel,
+                    incomingChannel = normalizedChannel,
+                    timeDiffMs = existingOccurredAt - occurredAtEpochMs
+                )
+                if (decision.action == AutoBookMergeAction.DROP_DUPLICATE) {
                     return@use true
                 }
             }
