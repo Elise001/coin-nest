@@ -54,33 +54,39 @@ class PaymentAccessibilityService : AccessibilityService() {
         runCatching {
             val merged = buildMergedContent(event, rootInActiveWindow)
             if (merged.isBlank()) return
+            val eventClass = event.className?.toString().orEmpty()
+            AutoBookTelemetry.track(
+                applicationContext,
+                event = "accessibility_detected",
+                packageName = pkg,
+                reason = "$eventClass | raw=${merged.take(760)}"
+            )
             val aiDecision = AutoBookAiDecisionLayer.assess(pkg, merged)
             if (!aiDecision.accepted) {
                 AutoBookTelemetry.track(
                     applicationContext,
                     event = "accessibility_drop",
                     packageName = pkg,
-                    reason = "AI_${aiDecision.kind}_${aiDecision.confidence}"
+                    reason = "AI_${aiDecision.kind}_${aiDecision.confidence} | raw=${merged.take(720)}"
                 )
                 return
             }
 
-            val eventClass = event.className?.toString().orEmpty()
             if (isDuplicateRawSnapshot(pkg, eventClass, merged)) {
                 AutoBookTelemetry.track(
                     applicationContext,
                     event = "accessibility_drop",
                     packageName = pkg,
-                    reason = "RAW_DUPLICATE_WINDOW"
+                    reason = "RAW_DUPLICATE_WINDOW | raw=${merged.take(720)}"
                 )
                 return
             }
 
             AutoBookTelemetry.track(
                 applicationContext,
-                event = "accessibility_detected",
+                event = "accessibility_parse_start",
                 packageName = pkg,
-                reason = merged.take(60)
+                reason = eventClass
             )
 
             val parsedResult = PaymentNotificationParser.parseWithDebug(
@@ -95,17 +101,23 @@ class PaymentAccessibilityService : AccessibilityService() {
                     applicationContext,
                     event = "accessibility_parse_failed",
                     packageName = pkg,
-                    reason = parsedResult.reason
+                    reason = "${parsedResult.reason} | raw=${merged.take(720)}"
                 )
                 return
             }
+            AutoBookTelemetry.trackRecognizedPayment(
+                context = applicationContext,
+                packageName = pkg,
+                channel = "ACCESS",
+                payment = parsed
+            )
 
             if (isDuplicateLogicalPayment(parsed, merged)) {
                 AutoBookTelemetry.track(
                     applicationContext,
                     event = "accessibility_drop",
                     packageName = pkg,
-                    reason = "ACCESS_DUPLICATE_WINDOW"
+                    reason = "ACCESS_DUPLICATE_WINDOW | raw=${merged.take(720)}"
                 )
                 return
             }

@@ -114,6 +114,14 @@ internal fun InsightTab(
             categoryBudgets = state.selectedMonthCategoryBudgets
         )
     }
+    val spendingAiInsight = remember(monthTx, state.previousMonthSummary.expenseCents, state.monthBudgetCents, anomalies) {
+        buildSpendingAiInsight(
+            monthTx = monthTx,
+            previousMonthExpenseCents = state.previousMonthSummary.expenseCents,
+            monthBudgetCents = state.monthBudgetCents,
+            anomalies = anomalies
+        )
+    }
 
     LaunchedEffect(selectedMonth) {
         if (YearMonth.from(selectedMonthDate) != selectedMonth) {
@@ -163,6 +171,12 @@ internal fun InsightTab(
                         OverviewTabMode.Yearly -> state.yearCategoryShare
                     }
                     SpendingFocusCard(mode = mode, shares = focusShares, onOpenBudgetSettings = onOpenBudgetSettings)
+                }
+                item {
+                    SpendingAiInsightCard(
+                        insight = spendingAiInsight,
+                        onOpenBudgetSettings = onOpenBudgetSettings
+                    )
                 }
                 item { AchievementMotivationCard(feedback = state.retentionFeedback) }
                 item {
@@ -442,8 +456,29 @@ internal fun InsightTab(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (anomalies.isEmpty()) {
-                    item { GlassCard { Text("本月暂无明显异常，继续保持当前记账节奏。") } }
+                    item {
+                        GlassCard {
+                            Text("本月暂无明显异常，继续保持当前记账节奏。")
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                spendingAiInsight.anomalyExplanation,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 } else {
+                    item {
+                        GlassCard(tone = GlassCardTone.Warning) {
+                            Text("本地异常解释", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                spendingAiInsight.anomalyExplanation,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     items(anomalies, key = { it.id }) { anomaly ->
                         GlassCard(tone = GlassCardTone.Warning) {
                             Text(anomaly.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -675,6 +710,41 @@ private fun SpendingFocusCard(
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(onClick = onOpenBudgetSettings, modifier = Modifier.fillMaxWidth()) {
             Text("去设置分类预算")
+        }
+    }
+}
+
+@Composable
+private fun SpendingAiInsightCard(
+    insight: SpendingAiInsight,
+    onOpenBudgetSettings: () -> Unit
+) {
+    GlassCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("本地 AI 消费画像", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "可信度 ${insight.confidenceLabel}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(insight.habitProfile, style = MaterialTheme.typography.bodySmall)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            insight.budgetAdvice,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (insight.suggestedBudgetCents != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onOpenBudgetSettings, modifier = Modifier.fillMaxWidth()) {
+                Text("参考预算 ${MoneyFormat.fromCents(insight.suggestedBudgetCents)}")
+            }
         }
     }
 }

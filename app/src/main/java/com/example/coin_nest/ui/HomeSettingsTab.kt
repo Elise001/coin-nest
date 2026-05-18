@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -90,6 +91,7 @@ internal fun SettingsTab(
     var replaceExisting by rememberSaveable { mutableStateOf(false) }
     var showClearSmartRuleConfirm by rememberSaveable { mutableStateOf(false) }
     var autoBookHealthRefreshTick by rememberSaveable { mutableIntStateOf(0) }
+    var debugLogRefreshTick by rememberSaveable { mutableIntStateOf(0) }
     var showAutoBookDiagnostics by rememberSaveable { mutableStateOf(false) }
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
     var pendingExportBytes by remember { mutableStateOf<Long?>(null) }
@@ -102,7 +104,8 @@ internal fun SettingsTab(
         listOf(
             ProfileNavEntry("自动记账与权限", "必要权限与稳定性优化", "autobook"),
             ProfileNavEntry("预算与分类", "月预算、分类预算、新增分类", "budget"),
-            ProfileNavEntry("数据与备份", "导出、导入与恢复", "data")
+            ProfileNavEntry("数据与备份", "导出、导入与恢复", "data"),
+            ProfileNavEntry("识别日志", "开发调试用，记录识别内容与拦截原因", "debug_logs")
         )
     }
     val formatTime: (Long?) -> String = { epochMs ->
@@ -485,6 +488,67 @@ internal fun SettingsTab(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text("最近恢复：${formatTime(lastImportAtMs)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("恢复状态：${lastImportStatus ?: "未执行"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        composable("debug_logs") {
+            val debugEvents = remember(debugLogRefreshTick) {
+                AutoBookTelemetry.readRecentAuditEvents(context)
+            }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    GlassCard {
+                        Text("识别日志", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "本地保留最近 ${debugEvents.size} 条自动识别事件，包含原始内容、解析结果、拦截原因和完整时间。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = { debugLogRefreshTick++ },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("刷新")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    AutoBookTelemetry.clearRecentAuditEvents(context)
+                                    debugLogRefreshTick++
+                                    autoBookHealthRefreshTick++
+                                    Toast.makeText(context, "识别日志已清空", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("清空")
+                            }
+                        }
+                    }
+                }
+                if (debugEvents.isEmpty()) {
+                    item {
+                        GlassCard {
+                            Text("暂无识别日志", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "收到通知或无障碍识别到页面内容后，会在这里显示调试记录。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    items(
+                        items = debugEvents,
+                        key = { "${it.occurredAtEpochMs}_${it.event}_${it.reason.hashCode()}" }
+                    ) { event ->
+                        AutoBookAuditEventRow(event = event, compact = false)
                     }
                 }
             }

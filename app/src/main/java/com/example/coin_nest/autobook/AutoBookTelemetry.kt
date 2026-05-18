@@ -2,8 +2,12 @@ package com.example.coin_nest.autobook
 
 import android.content.Context
 import android.util.Log
+import com.example.coin_nest.util.MoneyFormat
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 data class AutoBookAuditEvent(
     val event: String,
@@ -24,7 +28,9 @@ object AutoBookTelemetry {
     private const val KEY_LAST_NOTIFY_PACKAGE = "last_notify_package"
     private const val KEY_LAST_NOTIFY_PREVIEW = "last_notify_preview"
     private const val KEY_RECENT_EVENTS = "recent_events"
-    private const val MAX_RECENT_EVENTS = 8
+    private const val MAX_RECENT_EVENTS = 80
+    private const val MAX_REASON_LENGTH = 800
+    private val logTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
     fun track(
         context: Context,
@@ -33,7 +39,7 @@ object AutoBookTelemetry {
         packageName: String? = null
     ) {
         val now = System.currentTimeMillis()
-        val safeReason = reason.orEmpty().take(180)
+        val safeReason = reason.orEmpty().take(MAX_REASON_LENGTH)
         val safePkg = packageName.orEmpty().take(120)
         Log.i(TAG, "event=$event pkg=$safePkg reason=$safeReason ts=$now")
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -61,6 +67,20 @@ object AutoBookTelemetry {
         }.apply()
     }
 
+    fun trackRecognizedPayment(
+        context: Context,
+        packageName: String,
+        channel: String,
+        payment: ParsedPayment
+    ) {
+        track(
+            context = context,
+            event = "payment_recognized",
+            packageName = packageName,
+            reason = payment.toDebugReason(channel)
+        )
+    }
+
     fun readRecentAuditEvents(context: Context): List<AutoBookAuditEvent> {
         val raw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .getString(KEY_RECENT_EVENTS, null)
@@ -81,6 +101,13 @@ object AutoBookTelemetry {
                 }
             }
         }.getOrDefault(emptyList())
+    }
+
+    fun clearRecentAuditEvents(context: Context) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_RECENT_EVENTS)
+            .apply()
     }
 
     fun readLastReason(context: Context): String? {
@@ -132,5 +159,23 @@ object AutoBookTelemetry {
             index++
         }
         return output
+    }
+
+    private fun ParsedPayment.toDebugReason(channel: String): String {
+        val occurredAt = Instant.ofEpochMilli(occurredAtEpochMs)
+            .atZone(ZoneId.systemDefault())
+            .format(logTimeFormatter)
+        val amountPrefix = if (type.name.equals("INCOME", ignoreCase = true)) "+" else "-"
+        return buildString {
+            append("channel=").append(channel)
+            append(" source=").append(source)
+            append(" type=").append(type.name)
+            append(" amount=").append(amountPrefix).append(MoneyFormat.fromCents(amountCents))
+            append(" category=").append(parentCategory).append('/').append(childCategory)
+            append(" occurred=").append(occurredAt)
+            append(" ref=").append(transactionRef ?: "-")
+            append(" fingerprint=").append(fingerprint ?: "-")
+            append(" note=").append(note)
+        }
     }
 }

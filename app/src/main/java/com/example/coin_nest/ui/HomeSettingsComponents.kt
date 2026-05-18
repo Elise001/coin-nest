@@ -284,7 +284,10 @@ internal fun ProfileEntryCard(
 }
 
 @Composable
-internal fun AutoBookAuditEventRow(event: AutoBookAuditEvent) {
+internal fun AutoBookAuditEventRow(
+    event: AutoBookAuditEvent,
+    compact: Boolean = true
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -299,12 +302,16 @@ internal fun AutoBookAuditEventRow(event: AutoBookAuditEvent) {
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                formatEpoch(event.occurredAtEpochMs),
+                if (compact) formatEpoch(event.occurredAtEpochMs) else formatFullEpoch(event.occurredAtEpochMs),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        val reason = auditReasonLabel(event.reason.ifBlank { event.event })
+        val reason = if (compact) {
+            auditReasonLabel(event.reason.ifBlank { event.event })
+        } else {
+            event.reason.ifBlank { event.event }
+        }
         if (reason.isNotBlank()) {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
@@ -420,11 +427,13 @@ private fun ProfileHeroMetric(label: String, value: String, modifier: Modifier =
 private fun auditEventLabel(event: String): String {
     return when (event) {
         "notify_received" -> "收到通知"
+        "payment_recognized" -> "解析成功"
         "insert_success", "accessibility_insert_success" -> "已入队"
-        "insert_drop", "accessibility_insert_drop" -> "已过滤"
+        "insert_drop", "accessibility_insert_drop" -> "入库拦截"
         "parse_failed", "accessibility_parse_failed" -> "解析失败"
         "accessibility_detected" -> "识别到页面"
-        "accessibility_drop" -> "页面去重"
+        "accessibility_parse_start" -> "开始解析"
+        "accessibility_drop" -> "识别拦截"
         "listener_connected" -> "监听已连接"
         "accessibility_connected" -> "无障碍已连接"
         else -> event

@@ -3,6 +3,7 @@ package com.example.coin_nest.ui
 import com.example.coin_nest.data.db.CategoryBudgetEntity
 import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.util.MoneyFormat
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import kotlin.math.roundToInt
@@ -97,6 +98,95 @@ internal data class AnomalyInsight(
     val suggestions: List<String>,
     val relatedTransactions: List<TransactionEntity>
 )
+
+internal data class SpendingAiInsight(
+    val anomalyExplanation: String,
+    val habitProfile: String,
+    val budgetAdvice: String,
+    val suggestedBudgetCents: Long?,
+    val confidenceLabel: String
+)
+
+internal fun buildSpendingAiInsight(
+    monthTx: List<TransactionEntity>,
+    previousMonthExpenseCents: Long,
+    monthBudgetCents: Long?,
+    anomalies: List<AnomalyInsight>
+): SpendingAiInsight {
+    val expenseTx = monthTx.filter { it.type == "EXPENSE" }
+    if (expenseTx.isEmpty()) {
+        return SpendingAiInsight(
+            anomalyExplanation = "本月还没有足够支出样本，暂不判断异常。",
+            habitProfile = "画像待生成：先积累 7 天以上流水，系统会更稳。",
+            budgetAdvice = "预算建议待生成：建议先设一个保守月预算，再根据自动记账校准。",
+            suggestedBudgetCents = null,
+            confidenceLabel = "样本不足"
+        )
+    }
+
+    val totalExpense = expenseTx.sumOf { it.amountCents }
+    val expenseByDate = expenseTx.groupBy { Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).toLocalDate() }
+    val activeDays = expenseByDate.size.coerceAtLeast(1)
+    val dailyAverage = totalExpense / activeDays
+    val topCategory = expenseTx
+        .groupBy { it.parentCategory }
+        .mapValues { (_, list) -> list.sumOf { it.amountCents } }
+        .maxByOrNull { it.value }
+    val topCategoryRatio = topCategory?.let { it.value.toDouble() / totalExpense.coerceAtLeast(1L).toDouble() } ?: 0.0
+    val weekendExpense = expenseTx
+        .filter {
+            val day = Instant.ofEpochMilli(it.occurredAtEpochMs).atZone(zone).dayOfWeek
+            day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY
+        }
+        .sumOf { it.amountCents }
+    val weekendRatio = weekendExpense.toDouble() / totalExpense.coerceAtLeast(1L).toDouble()
+    val smallFrequentCount = expenseTx.count { it.amountCents in 1L..3_000L }
+    val confidenceLabel = when {
+        activeDays >= 20 && expenseTx.size >= 40 -> "高"
+        activeDays >= 10 && expenseTx.size >= 18 -> "中"
+        else -> "低"
+    }
+
+    val anomalyExplanation = when {
+        anomalies.isNotEmpty() -> {
+            val first = anomalies.first()
+            "最需要看的是「${first.title}」：${first.reason} 这不是简单报错，而是在提示本月节奏已经偏离你的常态。"
+        }
+        previousMonthExpenseCents > 0L && totalExpense < previousMonthExpenseCents * 0.85 -> {
+            "本月支出低于上月 15% 以上，异常方向是正向的：消费节奏变稳，可以继续观察是否来自真实节省。"
+        }
+        else -> "没有发现强异常，当前主要任务是保持自动记账，让样本继续变厚。"
+    }
+
+    val habitProfile = buildHabitProfileText(
+        topCategoryName = topCategory?.key,
+        topCategoryRatio = topCategoryRatio,
+        weekendRatio = weekendRatio,
+        smallFrequentCount = smallFrequentCount,
+        txCount = expenseTx.size,
+        dailyAverage = dailyAverage
+    )
+
+    val suggestedBudget = suggestMonthlyBudget(
+        currentExpenseCents = totalExpense,
+        previousExpenseCents = previousMonthExpenseCents,
+        currentBudgetCents = monthBudgetCents
+    )
+    val budgetAdvice = buildBudgetAdviceText(
+        totalExpense = totalExpense,
+        dailyAverage = dailyAverage,
+        monthBudgetCents = monthBudgetCents,
+        suggestedBudgetCents = suggestedBudget
+    )
+
+    return SpendingAiInsight(
+        anomalyExplanation = anomalyExplanation,
+        habitProfile = habitProfile,
+        budgetAdvice = budgetAdvice,
+        suggestedBudgetCents = suggestedBudget,
+        confidenceLabel = confidenceLabel
+    )
+}
 
 internal fun buildMonthlyAnomalies(
     monthTx: List<TransactionEntity>,
@@ -206,5 +296,70 @@ internal fun buildMonthlyAnomalies(
     }
 
     return anomalies.take(5)
+}
+
+private fun buildHabitProfileText(
+    topCategoryName: String?,
+    topCategoryRatio: Double,
+    weekendRatio: Double,
+    smallFrequentCount: Int,
+    txCount: Int,
+    dailyAverage: Long
+): String {
+    val categoryText = if (topCategoryName != null && topCategoryRatio >= 0.35) {
+        "你的消费明显集中在「$topCategoryName」，占比 ${(topCategoryRatio * 100).roundToInt()}%。"
+    } else {
+        "你的消费结构相对分散，没有单一分类过度主导。"
+    }
+    val rhythmText = if (weekendRatio >= 0.42) {
+        "休息日支出占比较高，更像“周末释放型”。"
+    } else {
+        "工作日支出更稳定，更像“日常节奏型”。"
+    }
+    val frequencyText = if (txCount > 0 && smallFrequentCount.toDouble() / txCount.toDouble() >= 0.45) {
+        "高频小额不少，适合重点盯通勤、餐饮、咖啡这类无感累积。"
+    } else {
+        "支出更偏少量中大额，适合重点复盘单笔必要性。"
+    }
+    return "$categoryText $rhythmText $frequencyText 日均支出约 ${MoneyFormat.fromCents(dailyAverage)}。"
+}
+
+private fun suggestMonthlyBudget(
+    currentExpenseCents: Long,
+    previousExpenseCents: Long,
+    currentBudgetCents: Long?
+): Long? {
+    val baseline = when {
+        previousExpenseCents > 0L -> ((currentExpenseCents + previousExpenseCents) / 2)
+        currentExpenseCents > 0L -> currentExpenseCents
+        else -> return currentBudgetCents
+    }
+    val suggested = (baseline * 0.92).toLong().coerceAtLeast(300_00L)
+    return roundBudgetCents(suggested)
+}
+
+private fun buildBudgetAdviceText(
+    totalExpense: Long,
+    dailyAverage: Long,
+    monthBudgetCents: Long?,
+    suggestedBudgetCents: Long?
+): String {
+    if (suggestedBudgetCents == null) return "暂时无法给出预算建议。"
+    val suggestedText = MoneyFormat.fromCents(suggestedBudgetCents)
+    if (monthBudgetCents == null || monthBudgetCents <= 0L) {
+        return "建议先把下月总预算设为 $suggestedText，再给最大分类单独设上限。"
+    }
+    val ratio = totalExpense.toDouble() / monthBudgetCents.toDouble()
+    return when {
+        ratio >= 1.0 -> "当前预算已经超额。下月建议预算参考 $suggestedText，同时把日均支出压到 ${MoneyFormat.fromCents(dailyAverage * 9 / 10)} 左右。"
+        ratio >= 0.85 -> "当前预算偏紧。下月建议预算参考 $suggestedText，并提前给高频分类加提醒。"
+        ratio <= 0.55 -> "当前预算偏宽。下月可尝试把预算收敛到 $suggestedText，让目标更有约束感。"
+        else -> "当前预算节奏基本合理。下月预算可参考 $suggestedText，重点优化最大分类即可。"
+    }
+}
+
+private fun roundBudgetCents(value: Long): Long {
+    val step = 10_000L
+    return ((value + step / 2) / step * step).coerceAtLeast(step)
 }
 

@@ -55,7 +55,7 @@ class PaymentNotificationListener : NotificationListenerService() {
                 .joinToString(" ")
                 .replace(Regex("\\s+"), " ")
                 .trim()
-                .take(48)
+                .take(800)
             AutoBookTelemetry.track(
                 applicationContext,
                 event = "notify_received",
@@ -72,11 +72,17 @@ class PaymentNotificationListener : NotificationListenerService() {
                     applicationContext,
                     event = "parse_failed",
                     packageName = packageName,
-                    reason = parsedResult.reason
+                    reason = "${parsedResult.reason} | raw=$preview"
                 )
                 debugPopup("IGNORE_NOTIFY($packageName): ${parsedResult.reason}")
                 return
             }
+            AutoBookTelemetry.trackRecognizedPayment(
+                context = applicationContext,
+                packageName = packageName,
+                channel = "NOTIFY",
+                payment = parsed
+            )
 
             scope.launch {
                 val insertResult = ServiceLocator.repository().addAutoTransaction(

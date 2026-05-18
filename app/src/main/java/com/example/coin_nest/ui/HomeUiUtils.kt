@@ -91,6 +91,10 @@ internal fun formatEpoch(epochMs: Long): String {
     return Instant.ofEpochMilli(epochMs).atZone(zone).format(DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
 }
 
+internal fun formatFullEpoch(epochMs: Long): String {
+    return Instant.ofEpochMilli(epochMs).atZone(zone).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+}
+
 internal const val WECHAT_PACKAGE_NAME = "com.tencent.mm"
 internal const val ALIPAY_PACKAGE_NAME = "com.eg.android.AlipayGphone"
 
