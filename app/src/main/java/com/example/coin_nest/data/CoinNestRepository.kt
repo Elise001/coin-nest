@@ -42,7 +42,8 @@ private data class SmartCategorySuggestion(
     val parentCategory: String,
     val childCategory: String,
     val keyword: String,
-    val hitCount: Int
+    val hitCount: Int,
+    val confidence: Int = 0
 )
 
 class CoinNestRepository(context: Context) {
@@ -148,33 +149,37 @@ class CoinNestRepository(context: Context) {
 
     suspend fun ensureDefaultCategories() = withContext(Dispatchers.IO) {
         val defaults = listOf(
-            "\u751f\u6d3b" to "\u9910\u996e",
-            "\u751f\u6d3b" to "\u65e5\u7528",
-            "\u751f\u6d3b" to "\u4f4f\u5bbf",
-            "\u751f\u6d3b" to "\u6c34\u7535\u7164",
-            "\u8d2d\u7269" to "\u65e5\u5e38\u8d2d\u7269",
-            "\u8d2d\u7269" to "\u670d\u9970\u7f8e\u5986",
-            "\u8d2d\u7269" to "\u6570\u7801\u7535\u5668",
-            "\u5a31\u4e50" to "\u7535\u5f71\u6e38\u620f",
-            "\u5a31\u4e50" to "\u65c5\u884c",
-            "\u533b\u7597" to "\u95e8\u8bca\u836f\u54c1",
-            "\u793e\u4ea4" to "\u793c\u91d1\u7ea2\u5305",
-            "\u5de5\u4f5c" to "\u901a\u52e4",
-            "\u5de5\u4f5c" to "\u529e\u516c",
-            "\u7406\u8d22" to "\u57fa\u91d1\u80a1\u7968",
-            "\u7406\u8d22" to "\u4fe1\u7528\u5361\u8fd8\u6b3e",
-            "\u6536\u5165" to "\u5de5\u8d44",
-            "\u6536\u5165" to "\u5956\u91d1",
-            "\u6536\u5165" to "\u8f6c\u8d26",
-            "\u6536\u5165" to "\u9000\u6b3e",
-            "\u6536\u5165" to "\u5176\u4ed6"
+            "工作日" to "通勤",
+            "工作日" to "餐费",
+            "工作日" to "日常",
+            "休息日" to "餐饮",
+            "休息日" to "出行",
+            "休息日" to "日",
+            "医疗" to "门诊药品",
+            "医疗" to "体检护理",
+            "网购" to "日常网购",
+            "网购" to "数码家电",
+            "网购" to "服饰美妆",
+            "社交" to "聚餐礼金",
+            "社交" to "红包转账",
+            "社交" to "租房",
+            "社交" to "水电燃气",
+            "收入" to "工资",
+            "收入" to "奖金",
+            "收入" to "转账",
+            "收入" to "退款",
+            "收入" to "其他"
         )
         val db = dbHelper.writableDatabase
         var inserted = 0
         var deleted = 0
         db.beginTransaction()
         try {
-            deleted += db.delete("categories", "parent IN (?, ?)", arrayOf("\u4ea4\u901a", "\u5b66\u4e60"))
+            deleted += db.delete(
+                "categories",
+                "parent IN (?, ?, ?, ?, ?, ?, ?)",
+                arrayOf("交通", "学习", "生活", "理财", "购物", "娱乐", "工作")
+            )
             defaults.forEach { (parent, child) ->
                 val values = ContentValues().apply {
                     put("parent", parent)
@@ -409,12 +414,16 @@ class CoinNestRepository(context: Context) {
         val smartSuggestion = suggestSmartCategory(
             type = autoType,
             source = source,
-            note = finalNote
+            note = finalNote,
+            amountCents = amountCents,
+            occurredAtEpochMs = occurredAt
         )
         val shouldApplySmartCategory = smartSuggestion != null && (
             safeParent == "\u5f85\u5206\u7c7b" ||
                 safeChild == "\u81ea\u52a8\u8bc6\u522b" ||
-                smartSuggestion.hitCount >= 3
+                isReplaceableAutoCategory(type = autoType, parent = safeParent) ||
+                smartSuggestion.hitCount >= 2 ||
+                smartSuggestion.confidence >= 70
             )
         val finalParentCategory = if (shouldApplySmartCategory) smartSuggestion!!.parentCategory else safeParent
         val finalChildCategory = if (shouldApplySmartCategory) smartSuggestion!!.childCategory else safeChild
@@ -623,6 +632,11 @@ class CoinNestRepository(context: Context) {
         }
     }
 
+    private fun isReplaceableAutoCategory(type: String, parent: String): Boolean {
+        if (type != TransactionType.EXPENSE.name) return false
+        return parent !in setOf("医疗", "网购", "社交")
+    }
+
     private fun learnSmartCategoryRuleFromUserCorrection(
         tx: TransactionEntity,
         targetParent: String,
@@ -630,7 +644,12 @@ class CoinNestRepository(context: Context) {
     ) {
         if (!isLearnableAutoSource(tx.source)) return
         if (targetParent.isBlank() || targetChild.isBlank()) return
-        val keywords = extractSmartKeywords(tx.note, tx.source)
+        val keywords = extractSmartKeywords(
+            note = tx.note,
+            source = tx.source,
+            amountCents = tx.amountCents,
+            occurredAtEpochMs = tx.occurredAtEpochMs
+        )
         if (keywords.isEmpty()) return
         val db = dbHelper.writableDatabase
         val now = System.currentTimeMillis()
@@ -659,13 +678,24 @@ class CoinNestRepository(context: Context) {
         }
     }
 
-    private fun suggestSmartCategory(type: String, source: String, note: String): SmartCategorySuggestion? {
+    private fun suggestSmartCategory(
+        type: String,
+        source: String,
+        note: String,
+        amountCents: Long,
+        occurredAtEpochMs: Long
+    ): SmartCategorySuggestion? {
         val sourceKey = source.uppercase()
         val rules = querySmartCategoryRules(type = type, source = sourceKey)
-        if (rules.isEmpty()) return null
         val normalizedNote = normalizeNote(note)
-        return rules
-            .filter { normalizedNote.contains(it.keyword) }
+        val behaviorKeywords = extractSmartKeywords(
+            note = note,
+            source = source,
+            amountCents = amountCents,
+            occurredAtEpochMs = occurredAtEpochMs
+        ).toSet()
+        val learnedSuggestion = rules
+            .filter { rule -> normalizedNote.contains(rule.keyword) || behaviorKeywords.contains(rule.keyword) }
             .maxWithOrNull(
                 compareByDescending<SmartCategoryRuleEntity> { it.hitCount }
                     .thenByDescending { it.keyword.length }
@@ -675,9 +705,28 @@ class CoinNestRepository(context: Context) {
                     parentCategory = it.parentCategory,
                     childCategory = it.childCategory,
                     keyword = it.keyword,
-                    hitCount = it.hitCount
+                    hitCount = it.hitCount,
+                    confidence = (70 + it.hitCount * 8).coerceAtMost(95)
                 )
             }
+        if (learnedSuggestion != null) return learnedSuggestion
+
+        val txType = runCatching { TransactionType.valueOf(type) }.getOrNull() ?: return null
+        return LocalCategoryAi.decide(
+            type = txType,
+            source = source,
+            note = note,
+            amountCents = amountCents,
+            occurredAtEpochMs = occurredAtEpochMs
+        )?.let { decision ->
+            SmartCategorySuggestion(
+                parentCategory = decision.parentCategory,
+                childCategory = decision.childCategory,
+                keyword = decision.reason,
+                hitCount = 0,
+                confidence = decision.confidence
+            )
+        }
     }
 
     private fun querySmartRuleHitCount(type: String, source: String, keyword: String): Int {
@@ -755,6 +804,18 @@ class CoinNestRepository(context: Context) {
                 }
             }
         }
+    }
+
+    private fun extractSmartKeywords(
+        note: String,
+        source: String,
+        amountCents: Long,
+        occurredAtEpochMs: Long
+    ): List<String> {
+        return (
+            extractSmartKeywords(note, source) +
+                LocalCategoryAi.learningTokens(source, amountCents, occurredAtEpochMs)
+            ).distinct()
     }
 
     private fun extractSmartKeywords(note: String, source: String): List<String> {

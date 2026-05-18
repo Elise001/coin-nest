@@ -408,8 +408,8 @@ class CoinNestViewModel(
                 TransactionInput(
                     amountCents = amountCents,
                     type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
-                    parentCategory = parentCategory.ifBlank { if (isIncome) "\u6536\u5165" else "\u751f\u6d3b" },
-                    childCategory = childCategory.ifBlank { if (isIncome) "\u5176\u4ed6" else "\u672a\u5206\u7c7b" },
+                    parentCategory = parentCategory.ifBlank { if (isIncome) "\u6536\u5165" else "工作日" },
+                    childCategory = childCategory.ifBlank { if (isIncome) "\u5176\u4ed6" else "日常" },
                     source = "MANUAL",
                     note = note,
                     occurredAtEpochMs = occurredAtEpochMs

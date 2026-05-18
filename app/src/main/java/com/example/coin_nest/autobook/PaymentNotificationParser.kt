@@ -234,25 +234,22 @@ private fun suggestCategory(merged: String, type: TransactionType): Pair<String,
         }
     }
 
-    if (merged.contains("信用卡", ignoreCase = true) && merged.contains("还款", ignoreCase = true)) {
-        return "理财" to "信用卡还款"
-    }
-    if (merged.contains("美团", ignoreCase = true) || merged.contains("外卖", ignoreCase = true)) {
-        return "生活" to "餐饮"
+    if (merged.contains("医院", ignoreCase = true) || merged.contains("药店", ignoreCase = true) || merged.contains("医保", ignoreCase = true)) {
+        return "医疗" to "门诊药品"
     }
     if (
         merged.contains("淘宝", ignoreCase = true) ||
         merged.contains("京东", ignoreCase = true) ||
-        merged.contains("拼多多", ignoreCase = true)
+        merged.contains("拼多多", ignoreCase = true) ||
+        merged.contains("天猫", ignoreCase = true)
     ) {
-        return "购物" to "日常购物"
+        return "网购" to "日常网购"
     }
-    if (merged.contains("转账", ignoreCase = true)) {
-        return "待分类" to "转账转出"
+    if (merged.contains("红包", ignoreCase = true) || merged.contains("礼金", ignoreCase = true) || merged.contains("聚餐", ignoreCase = true)) {
+        return "社交" to "聚餐礼金"
     }
     return "待分类" to "自动识别"
 }
-
 private fun extractAmount(merged: String): ParsedAmount? {
     val candidates = amountRegex.findAll(merged).mapNotNull { match ->
         val raw = match.value.trim()

@@ -85,10 +85,10 @@ internal fun RecordTab(
 
     val templates = remember {
         listOf(
-            RecordTemplate("早餐", "15", false, "生活", "餐饮", "早餐"),
-            RecordTemplate("午饭", "35", false, "生活", "餐饮", "午饭"),
-            RecordTemplate("咖啡", "18", false, "生活", "餐饮", "咖啡"),
-            RecordTemplate("地铁", "4", false, "工作", "通勤", "通勤"),
+            RecordTemplate("通勤", "4", false, "工作日", "通勤", "通勤"),
+            RecordTemplate("午饭", "35", false, "工作日", "工作餐", "午饭"),
+            RecordTemplate("咖啡", "18", false, "工作日", "日常", "咖啡"),
+            RecordTemplate("周末餐", "60", false, "休息日", "休闲餐饮", "周末餐饮"),
             RecordTemplate("工资", "5000", true, "收入", "工资", "工资入账")
         )
     }
