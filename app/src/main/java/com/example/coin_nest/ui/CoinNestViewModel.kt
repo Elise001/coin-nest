@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+private const val DEV_REWARD_ACTIVE_DAYS = 999
+
 data class HomeUiState(
     val daily: BalanceSummary = BalanceSummary(),
     val monthly: BalanceSummary = BalanceSummary(),
@@ -48,7 +50,8 @@ data class HomeUiState(
     val monthHasMore: Boolean = false,
     val yearHasMore: Boolean = false,
     val pendingAutoTransactions: List<TransactionEntity> = emptyList(),
-    val smartLearningStatus: SmartLearningStatus = SmartLearningStatus()
+    val smartLearningStatus: SmartLearningStatus = SmartLearningStatus(),
+    val activeBookkeepingDays: Int = DEV_REWARD_ACTIVE_DAYS
 )
 
 data class SmartLearningKeyword(
@@ -359,10 +362,12 @@ class CoinNestViewModel(
 
     val uiState: StateFlow<HomeUiState> = combine(
         baseUiStateFlow,
-        smartRuleFlow
-    ) { base, smartRules ->
+        smartRuleFlow,
+        repository.observeActiveBookkeepingDayCount()
+    ) { base, smartRules, activeDays ->
         base.copy(
-            smartLearningStatus = buildSmartLearningStatus(smartRules)
+            smartLearningStatus = buildSmartLearningStatus(smartRules),
+            activeBookkeepingDays = maxOf(activeDays, DEV_REWARD_ACTIVE_DAYS)
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 

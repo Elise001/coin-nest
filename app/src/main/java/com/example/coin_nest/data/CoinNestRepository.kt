@@ -98,6 +98,14 @@ class CoinNestRepository(context: Context) {
         }
     }
 
+    fun observeActiveBookkeepingDayCount(): Flow<Int> {
+        return changeTick.map {
+            withContext(Dispatchers.IO) {
+                queryActiveBookkeepingDayCount()
+            }
+        }
+    }
+
     fun observeExpenseByDayInRange(
         startInclusive: Long,
         endExclusive: Long
@@ -966,6 +974,20 @@ class CoinNestRepository(context: Context) {
               AND status = ?
             """.trimIndent(),
             arrayOf(startInclusive.toString(), endExclusive.toString(), STATUS_CONFIRMED)
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) c.getInt(c.getColumnIndexOrThrow("cnt")) else 0
+        }
+    }
+
+    private fun queryActiveBookkeepingDayCount(): Int {
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT COUNT(DISTINCT date(occurred_at_epoch_ms / 1000, 'unixepoch', 'localtime')) AS cnt
+            FROM transactions
+            WHERE status = ?
+            """.trimIndent(),
+            arrayOf(STATUS_CONFIRMED)
         )
         return cursor.use { c ->
             if (c.moveToFirst()) c.getInt(c.getColumnIndexOrThrow("cnt")) else 0

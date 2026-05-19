@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -108,6 +109,17 @@ internal fun SettingsTab(
     var lastBackupStatus by rememberSaveable { mutableStateOf<String?>(null) }
     var lastImportAtMs by rememberSaveable { mutableStateOf<Long?>(null) }
     var lastImportStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    var profilePrefs by remember { mutableStateOf(ProfilePreferenceStore.load(context)) }
+    var draftNickname by rememberSaveable { mutableStateOf(profilePrefs.nickname) }
+    var draftAvatarPresetId by rememberSaveable { mutableStateOf(profilePrefs.avatarPresetId) }
+    var draftAvatarImageUri by rememberSaveable { mutableStateOf(profilePrefs.avatarImageUri) }
+    var rewardUnlockNotice by remember { mutableStateOf<RewardDefinition?>(null) }
+    val rewardProgress = remember(state.activeBookkeepingDays, profilePrefs.selectedRewardId) {
+        buildRewardProgress(
+            activeDays = state.activeBookkeepingDays,
+            selectedRewardId = profilePrefs.selectedRewardId
+        )
+    }
     val profileEntries = remember {
         listOf(
             ProfileNavEntry("自动记账与权限", "必要权限与稳定性优化", "autobook"),
@@ -187,6 +199,16 @@ internal fun SettingsTab(
             Toast.makeText(context, "读取文件失败：${it.message ?: "未知错误"}", Toast.LENGTH_SHORT).show()
         }
     }
+    val avatarImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+        draftAvatarImageUri = uri.toString()
+    }
     val autoBookHealth = remember(autoBookHealthRefreshTick) { getAutoBookHealthStatus(context) }
     val healthPassRate = remember(autoBookHealth) {
         val required = autoBookHealth.requiredChecks
@@ -220,6 +242,13 @@ internal fun SettingsTab(
     LaunchedEffect(budgetChildOptions) {
         if (budgetChild !in budgetChildOptions) budgetChild = budgetChildOptions.firstOrNull().orEmpty()
     }
+    LaunchedEffect(state.activeBookkeepingDays) {
+        val latest = rewardCatalog.lastOrNull { state.activeBookkeepingDays >= it.requiredDays }
+        if (latest != null && latest.requiredDays > profilePrefs.lastRewardShownDay) {
+            profilePrefs = ProfilePreferenceStore.markRewardShown(context, latest.requiredDays)
+            rewardUnlockNotice = latest
+        }
+    }
 
     NavHost(
         navController = settingsNav,
@@ -232,12 +261,27 @@ internal fun SettingsTab(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
-                    ProfileControlHero(
+                    ProfileRewardControlHero(
+                        profile = profilePrefs,
+                        rewardProgress = rewardProgress,
                         autoBookHealthy = autoBookHealth.healthy,
                         budgetText = state.monthBudgetCents?.let { MoneyFormat.fromCents(it) } ?: "未设置",
                         rules = state.smartLearningStatus.totalRules,
-                        onOpenProfile = { settingsNav.navigate("profile_detail") }
+                        onOpenProfile = { settingsNav.navigate("profile_detail") },
+                        onOpenRewards = { settingsNav.navigate("rewards") }
                     )
+                }
+                rewardUnlockNotice?.let { reward ->
+                    item {
+                        RewardUnlockNoticeCard(
+                            reward = reward,
+                            onOpenRewards = {
+                                rewardUnlockNotice = null
+                                settingsNav.navigate("rewards")
+                            },
+                            onDismiss = { rewardUnlockNotice = null }
+                        )
+                    }
                 }
                 item {
                     GlassCard {
@@ -568,13 +612,83 @@ internal fun SettingsTab(
             ) {
                 item {
                     GlassCard {
-                        Text("账号信息", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MetricPill(label = "昵称", value = "zh", modifier = Modifier.weight(1f))
-                            MetricPill(label = "品牌", value = "Coin Nest", modifier = Modifier.weight(1f))
+                        Text("个人资料", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ProfileAvatar(
+                                profile = profilePrefs.copy(
+                                    avatarPresetId = draftAvatarPresetId,
+                                    avatarImageUri = draftAvatarImageUri
+                                ),
+                                size = 64,
+                                activeReward = rewardProgress.currentReward
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("头像", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "使用本地预设或选择相册图片。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { avatarImageLauncher.launch(arrayOf("image/*")) },
+                                modifier = Modifier.defaultMinSize(minHeight = 44.dp)
+                            ) {
+                                Text("相册")
+                            }
                         }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        AvatarPresetPicker(
+                            profile = profilePrefs,
+                            selectedPresetId = draftAvatarPresetId,
+                            onSelectPreset = {
+                                draftAvatarPresetId = it
+                                draftAvatarImageUri = null
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = draftNickname,
+                            onValueChange = { draftNickname = it.take(16) },
+                            label = { Text("昵称") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        PrimaryActionButton(
+                            text = "保存资料",
+                            onClick = {
+                                profilePrefs = ProfilePreferenceStore.saveIdentity(
+                                    context = context,
+                                    nickname = draftNickname,
+                                    avatarPresetId = draftAvatarPresetId,
+                                    avatarImageUri = draftAvatarImageUri
+                                )
+                                Toast.makeText(context, "个人资料已保存", Toast.LENGTH_SHORT).show()
+                                settingsNav.popBackStack()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
+                }
+            }
+        }
+        composable("rewards") {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item {
+                    RewardCenterCard(
+                        progress = rewardProgress,
+                        selectedRewardId = profilePrefs.selectedRewardId,
+                        onSelectReward = { rewardId ->
+                            profilePrefs = ProfilePreferenceStore.saveSelectedReward(context, rewardId)
+                            Toast.makeText(context, "奖励外观已启用", Toast.LENGTH_SHORT).show()
+                        }
+                    )
                 }
             }
         }
