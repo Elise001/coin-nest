@@ -178,7 +178,6 @@ internal fun InsightTab(
                         onOpenBudgetSettings = onOpenBudgetSettings
                     )
                 }
-                item { AchievementMotivationCard(feedback = state.retentionFeedback) }
                 item {
                     when (mode) {
                         OverviewTabMode.Weekly -> InsightEntryCard(
@@ -774,24 +773,6 @@ private fun buildSpendingFocusInsight(
         summaryText = "$periodLabel「${top.name}」支出 ${MoneyFormat.fromCents(top.amountCents)}，占比 $ratioPercent%。",
         actionText = actionText
     )
-}
-
-@Composable
-private fun AchievementMotivationCard(feedback: RetentionFeedbackState) {
-    val milestones = listOf(3, 7, 14, 30)
-    val next = milestones.firstOrNull { feedback.currentStreakDays < it } ?: 30
-    val progress = (feedback.currentStreakDays.toFloat() / next.toFloat()).coerceIn(0f, 1f)
-    GlassCard {
-        Text("成就与留存", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("连续记账 ${feedback.currentStreakDays} 天，距离 ${next} 天还差 ${(next - feedback.currentStreakDays).coerceAtLeast(0)} 天", style = MaterialTheme.typography.bodySmall)
-        Spacer(modifier = Modifier.height(6.dp))
-        Box(modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))) {
-            Box(modifier = Modifier.fillMaxWidth(progress).height(8.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)))
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("本月活跃 ${feedback.activeDaysInSelectedMonth} 天 · 最长连记 ${feedback.longestStreakDays} 天", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
 }
 
 @Composable

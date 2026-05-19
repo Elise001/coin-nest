@@ -58,6 +58,14 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+private val autoBookDebugLogEvents = setOf(
+    "ai_decision_accept",
+    "ai_decision_reject",
+    "payment_recognized",
+    "accessibility_parse_failed",
+    "parse_failed"
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsTab(
@@ -190,7 +198,7 @@ internal fun SettingsTab(
         parsed != null && parsed > BigDecimal.ZERO
     }
     val grouped = remember(state.categories) { state.categories.groupBy { it.parent } }
-    val budgetParentOptions = remember(grouped) { grouped.keys.sorted() }
+    val budgetParentOptions = remember(grouped) { grouped.keys.sortedWith(categoryParentComparator) }
     val budgetChildOptions = remember(budgetParent, grouped) { grouped[budgetParent].orEmpty().map { it.child }.distinct().sorted() }
     val canSetCategoryBudget = remember(budgetParent, budgetChild, categoryBudgetAmount) {
         budgetParent.isNotBlank() && budgetChild.isNotBlank() &&
@@ -227,7 +235,6 @@ internal fun SettingsTab(
                     ProfileControlHero(
                         autoBookHealthy = autoBookHealth.healthy,
                         budgetText = state.monthBudgetCents?.let { MoneyFormat.fromCents(it) } ?: "未设置",
-                        activeDays = state.retentionFeedback.activeDaysInSelectedMonth,
                         rules = state.smartLearningStatus.totalRules,
                         onOpenProfile = { settingsNav.navigate("profile_detail") }
                     )
@@ -356,7 +363,7 @@ internal fun SettingsTab(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(24.dp),
-                            containerColor = WarningColor
+                            containerColor = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         PrimaryActionButton(
@@ -375,7 +382,7 @@ internal fun SettingsTab(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(24.dp),
-                            containerColor = WarningColor
+                            containerColor = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         PrimaryActionButton(
@@ -390,7 +397,7 @@ internal fun SettingsTab(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(24.dp),
-                            containerColor = WarningColor
+                            containerColor = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -495,6 +502,7 @@ internal fun SettingsTab(
         composable("debug_logs") {
             val debugEvents = remember(debugLogRefreshTick) {
                 AutoBookTelemetry.readRecentAuditEvents(context)
+                    .filter { it.event in autoBookDebugLogEvents }
             }
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -565,17 +573,6 @@ internal fun SettingsTab(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             MetricPill(label = "昵称", value = "zh", modifier = Modifier.weight(1f))
                             MetricPill(label = "品牌", value = "Coin Nest", modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-                item {
-                    GlassCard {
-                        Text("记录概览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MetricPill(label = "本月活跃", value = "${state.retentionFeedback.activeDaysInSelectedMonth}天", modifier = Modifier.weight(1f))
-                            MetricPill(label = "当前连记", value = "${state.retentionFeedback.currentStreakDays}天", modifier = Modifier.weight(1f))
-                            MetricPill(label = "最长连记", value = "${state.retentionFeedback.longestStreakDays}天", modifier = Modifier.weight(1f))
                         }
                     }
                 }

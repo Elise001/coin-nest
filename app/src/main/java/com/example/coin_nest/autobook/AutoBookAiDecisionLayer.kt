@@ -59,6 +59,9 @@ object AutoBookAiDecisionLayer {
         val noiseHits = noiseSignals.count { text.contains(it, ignoreCase = true) }
         val isTrustedPaymentPackage = packageName in trustedPaymentPackages
 
+        if (text.length > 380 && paymentHits <= 1) {
+            return reject(AutoBookAiTextKind.LOW_CONFIDENCE, 10, "文本过长，不像付款结果页")
+        }
         if (noiseHits > 0 && paymentHits == 0) {
             return reject(AutoBookAiTextKind.NOISE, 8, "噪声文本")
         }

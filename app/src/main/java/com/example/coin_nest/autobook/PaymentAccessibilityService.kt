@@ -62,6 +62,12 @@ class PaymentAccessibilityService : AccessibilityService() {
                 reason = "$eventClass | raw=${merged.take(760)}"
             )
             val aiDecision = AutoBookAiDecisionLayer.assess(pkg, merged)
+            AutoBookTelemetry.track(
+                applicationContext,
+                event = if (aiDecision.accepted) "ai_decision_accept" else "ai_decision_reject",
+                packageName = pkg,
+                reason = "ACCESS ${aiDecision.kind} ${aiDecision.confidence} ${aiDecision.reason} | raw=${merged.take(720)}"
+            )
             if (!aiDecision.accepted) {
                 AutoBookTelemetry.track(
                     applicationContext,

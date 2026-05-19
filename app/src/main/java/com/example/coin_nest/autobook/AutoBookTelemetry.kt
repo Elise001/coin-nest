@@ -31,6 +31,13 @@ object AutoBookTelemetry {
     private const val MAX_RECENT_EVENTS = 80
     private const val MAX_REASON_LENGTH = 800
     private val logTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+    private val recentAuditEvents = setOf(
+        "ai_decision_accept",
+        "ai_decision_reject",
+        "payment_recognized",
+        "parse_failed",
+        "accessibility_parse_failed"
+    )
 
     fun track(
         context: Context,
@@ -43,19 +50,21 @@ object AutoBookTelemetry {
         val safePkg = packageName.orEmpty().take(120)
         Log.i(TAG, "event=$event pkg=$safePkg reason=$safeReason ts=$now")
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val recentEvents = appendRecentEvent(
-            existingJson = prefs.getString(KEY_RECENT_EVENTS, null),
-            event = event,
-            reason = safeReason,
-            packageName = safePkg,
-            occurredAtEpochMs = now
-        )
         prefs.edit().apply {
             putString(KEY_LAST_EVENT, event)
             putString(KEY_LAST_REASON, safeReason)
             putString(KEY_LAST_PACKAGE, safePkg)
             putLong(KEY_LAST_EVENT_MS, now)
-            putString(KEY_RECENT_EVENTS, recentEvents.toString())
+            if (event in recentAuditEvents) {
+                val recentEvents = appendRecentEvent(
+                    existingJson = prefs.getString(KEY_RECENT_EVENTS, null),
+                    event = event,
+                    reason = safeReason,
+                    packageName = safePkg,
+                    occurredAtEpochMs = now
+                )
+                putString(KEY_RECENT_EVENTS, recentEvents.toString())
+            }
             if (event == "listener_connected") {
                 putLong(KEY_LAST_LISTENER_CONNECTED_MS, now)
             }

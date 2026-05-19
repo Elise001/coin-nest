@@ -124,7 +124,6 @@ internal fun CompactSmartLearningCard(
 internal fun ProfileControlHero(
     autoBookHealthy: Boolean,
     budgetText: String,
-    activeDays: Int,
     rules: Int,
     onOpenProfile: () -> Unit
 ) {
@@ -152,7 +151,7 @@ internal fun ProfileControlHero(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("账户控制台", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
-                        Text("本月已记账 $activeDays 天 · 点此查看账户", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f))
+                        Text("预算 $budgetText · 自动记账${if (autoBookHealthy) "可用" else "待修复"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f))
                     }
                     Text("›", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
                 }
@@ -241,7 +240,7 @@ internal fun PermissionActionRow(
             onClick = onClick,
             modifier = pressModifier,
             shape = RoundedCornerShape(24.dp),
-            containerColor = WarningColor,
+            containerColor = MaterialTheme.colorScheme.primary,
             interactionSource = interactionSource
         )
     }
@@ -427,6 +426,8 @@ private fun ProfileHeroMetric(label: String, value: String, modifier: Modifier =
 private fun auditEventLabel(event: String): String {
     return when (event) {
         "notify_received" -> "收到通知"
+        "ai_decision_accept" -> "决策通过"
+        "ai_decision_reject" -> "决策拒绝"
         "payment_recognized" -> "解析成功"
         "insert_success", "accessibility_insert_success" -> "已入队"
         "insert_drop", "accessibility_insert_drop" -> "入库拦截"

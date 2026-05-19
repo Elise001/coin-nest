@@ -87,6 +87,18 @@ internal fun formatSourceLabel(source: String): String {
     }
 }
 
+internal val categoryParentComparator: Comparator<String> = compareBy<String> { parent ->
+    when (parent) {
+        "工作日" -> 0
+        "休息日" -> 1
+        "医疗" -> 2
+        "网购" -> 3
+        "社交" -> 4
+        "收入" -> 5
+        else -> 20
+    }
+}.thenBy { it }
+
 internal fun formatEpoch(epochMs: Long): String {
     return Instant.ofEpochMilli(epochMs).atZone(zone).format(DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
 }

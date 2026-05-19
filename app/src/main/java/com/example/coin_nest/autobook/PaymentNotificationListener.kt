@@ -65,7 +65,29 @@ class PaymentNotificationListener : NotificationListenerService() {
             val summaryTag = if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) "[SUMMARY]" else ""
             debugPopup("PAYMENT_NOTIFY$summaryTag: $packageName ${title.orEmpty().take(12)}")
 
-            val parsedResult = PaymentNotificationParser.parseWithDebug(packageName, title, text, sbn.postTime)
+            val decisionText = listOfNotNull(title, text)
+                .joinToString(" ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+            val aiDecision = AutoBookAiDecisionLayer.assess(packageName, decisionText)
+            AutoBookTelemetry.track(
+                applicationContext,
+                event = if (aiDecision.accepted) "ai_decision_accept" else "ai_decision_reject",
+                packageName = packageName,
+                reason = "NOTIFY ${aiDecision.kind} ${aiDecision.confidence} ${aiDecision.reason} | raw=${decisionText.take(720)}"
+            )
+            if (!aiDecision.accepted) {
+                debugPopup("IGNORE_NOTIFY($packageName): ${aiDecision.reason}")
+                return
+            }
+
+            val parsedResult = PaymentNotificationParser.parseWithDebug(
+                packageName,
+                title,
+                text,
+                sbn.postTime,
+                aiDecisionOverride = aiDecision
+            )
             val parsed = parsedResult.payment
             if (parsed == null) {
                 AutoBookTelemetry.track(

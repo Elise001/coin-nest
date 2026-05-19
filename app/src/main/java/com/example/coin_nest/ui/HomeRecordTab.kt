@@ -58,7 +58,7 @@ import java.time.LocalTime
 import kotlin.math.abs
 import kotlin.math.max
 
-private enum class QuickFillMode { FULL_TEMPLATE, CATEGORY_ONLY }
+private enum class QuickFillMode { WORKDAY, RESTDAY }
 
 @Composable
 internal fun RecordTab(
@@ -80,38 +80,43 @@ internal fun RecordTab(
     var selectedRecordDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
     var amountError by rememberSaveable { mutableStateOf<String?>(null) }
     var categoryError by rememberSaveable { mutableStateOf(false) }
-    var quickFillMode by rememberSaveable { mutableStateOf(QuickFillMode.FULL_TEMPLATE) }
+    var quickFillMode by rememberSaveable {
+        mutableStateOf(if (LocalDate.now().dayOfWeek.value in 1..5) QuickFillMode.WORKDAY else QuickFillMode.RESTDAY)
+    }
     var showNoteField by rememberSaveable { mutableStateOf(false) }
 
     val templates = remember {
         listOf(
             RecordTemplate("通勤", "4", false, "工作日", "通勤", "通勤"),
+            RecordTemplate("早餐", "8", false, "工作日", "工作餐", "早餐"),
             RecordTemplate("午饭", "35", false, "工作日", "工作餐", "午饭"),
             RecordTemplate("咖啡", "18", false, "工作日", "日常", "咖啡"),
+            RecordTemplate("便利店", "16", false, "工作日", "日常", "便利店"),
             RecordTemplate("周末餐", "60", false, "休息日", "休闲餐饮", "周末餐饮"),
+            RecordTemplate("奶茶", "18", false, "休息日", "休闲餐饮", "奶茶"),
+            RecordTemplate("打车", "35", false, "休息日", "出行", "打车"),
+            RecordTemplate("电影", "45", false, "休息日", "日常", "电影"),
+            RecordTemplate("购物", "100", false, "休息日", "日常", "周末购物"),
             RecordTemplate("工资", "5000", true, "收入", "工资", "工资入账")
         )
     }
-    val shownTemplates = remember(isIncome, templates) { templates.filter { it.isIncome == isIncome } }
+    val shownTemplates = remember(isIncome, quickFillMode, templates) {
+        if (isIncome) {
+            templates.filter { it.isIncome }
+        } else {
+            val targetParent = if (quickFillMode == QuickFillMode.WORKDAY) "工作日" else "休息日"
+            templates.filter { !it.isIncome && it.parent == targetParent }
+        }
+    }
 
     val grouped = remember(state.categories) { state.categories.groupBy { it.parent } }
     val parentOptions = remember(grouped, isIncome) {
-        val keys = grouped.keys.toList().sorted()
+        val keys = grouped.keys.toList().sortedWith(categoryParentComparator)
         if (isIncome) keys.filter { it == "收入" }.ifEmpty { keys } else keys.filter { it != "收入" }.ifEmpty { keys }
     }
     val childOptions = remember(parentCategory, grouped) { grouped[parentCategory].orEmpty().map { it.child }.distinct().sorted() }
-    val recentCategoryPairs = remember(state.monthTransactions, isIncome) {
-        val targetType = if (isIncome) "INCOME" else "EXPENSE"
-        state.monthTransactions.asSequence()
-            .filter { it.type == targetType }
-            .sortedByDescending { it.occurredAtEpochMs }
-            .map { it.parentCategory to it.childCategory }
-            .distinct()
-            .take(8)
-            .toList()
-    }
     val quickAmounts = remember(isIncome) {
-        if (isIncome) listOf("500", "1000", "3000", "5000") else listOf("10", "20", "30", "50", "100")
+        if (isIncome) listOf("5000", "10000", "15000", "20000") else listOf("10", "20", "30", "50", "100")
     }
     val parsedAmountCents = remember(amount) { MoneyParser.parseYuanToCents(amount) }
     val recommendedCategoryPair = remember(state.monthTransactions, isIncome, parsedAmountCents) {
@@ -155,7 +160,7 @@ internal fun RecordTab(
     LaunchedEffect(isIncome) {
         selectedTemplateLabel = ""
         selectedCategoryShortcut = ""
-        quickFillMode = QuickFillMode.FULL_TEMPLATE
+        quickFillMode = if (selectedRecordDate.dayOfWeek.value in 1..5) QuickFillMode.WORKDAY else QuickFillMode.RESTDAY
     }
 
     LazyColumn(
@@ -196,43 +201,18 @@ internal fun RecordTab(
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
-                SectionTitle(
-                    title = "快捷填充",
-                    subtitle = if (quickFillMode == QuickFillMode.FULL_TEMPLATE) {
-                        "完整模板：会填充金额、分类、备注"
-                    } else {
-                        "仅分类：只修改分类，不改金额与备注"
-                    }
-                )
+                SectionTitle(title = "快捷填充")
                 Spacer(modifier = Modifier.height(8.dp))
 
                 SegmentedSelector(
-                    options = listOf("完整模板", "仅分类"),
-                    selectedIndex = if (quickFillMode == QuickFillMode.FULL_TEMPLATE) 0 else 1,
+                    options = listOf("工作日", "休息日"),
+                    selectedIndex = if (quickFillMode == QuickFillMode.WORKDAY) 0 else 1,
                     onSelect = { index ->
-                        quickFillMode = if (index == 0) QuickFillMode.FULL_TEMPLATE else QuickFillMode.CATEGORY_ONLY
+                        quickFillMode = if (index == 0) QuickFillMode.WORKDAY else QuickFillMode.RESTDAY
+                        selectedTemplateLabel = ""
+                        selectedCategoryShortcut = ""
                     }
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = if (quickFillMode == QuickFillMode.FULL_TEMPLATE) {
-                            "当前模式：完整模板（会修改金额、分类、备注）"
-                        } else {
-                            "当前模式：仅分类（不会修改金额和备注）"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
@@ -241,43 +221,22 @@ internal fun RecordTab(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (quickFillMode == QuickFillMode.FULL_TEMPLATE) {
-                        shownTemplates.forEach { tpl ->
-                            QuickActionChip(
-                                label = tpl.label,
-                                selected = selectedTemplateLabel == tpl.label,
-                                onClick = {
-                                    amount = tpl.amountYuan
-                                    isIncome = tpl.isIncome
-                                    parentCategory = tpl.parent
-                                    childCategory = tpl.child
-                                    note = tpl.note
-                                    selectedTemplateLabel = tpl.label
-                                    selectedCategoryShortcut = ""
-                                    amountError = null
-                                    categoryError = false
-                                }
-                            )
-                        }
-                    } else {
-                        if (recentCategoryPairs.isEmpty()) {
-                            Text("暂无可复用分类", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        } else {
-                            recentCategoryPairs.forEach { pair ->
-                                val key = "${pair.first}/${pair.second}"
-                                QuickActionChip(
-                                    label = key,
-                                    selected = selectedCategoryShortcut == key,
-                                    onClick = {
-                                        parentCategory = pair.first
-                                        childCategory = pair.second
-                                        selectedCategoryShortcut = key
-                                        selectedTemplateLabel = ""
-                                        categoryError = false
-                                    }
-                                )
+                    shownTemplates.forEach { tpl ->
+                        QuickActionChip(
+                            label = tpl.label,
+                            selected = selectedTemplateLabel == tpl.label,
+                            onClick = {
+                                amount = tpl.amountYuan
+                                isIncome = tpl.isIncome
+                                parentCategory = tpl.parent
+                                childCategory = tpl.child
+                                note = tpl.note
+                                selectedTemplateLabel = tpl.label
+                                selectedCategoryShortcut = ""
+                                amountError = null
+                                categoryError = false
                             }
-                        }
+                        )
                     }
                 }
 

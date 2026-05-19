@@ -69,8 +69,7 @@ object LocalCategoryAi {
             text.containsAny("退款", "退回", "返现") -> LocalCategoryDecision("收入", "退款", 80, "AI:退款收入")
             text.containsAny("工资", "薪资") -> LocalCategoryDecision("收入", "工资", 80, "AI:工资收入")
             text.containsAny("奖金", "绩效") -> LocalCategoryDecision("收入", "奖金", 76, "AI:奖金收入")
-            text.containsAny("转账", "收款") -> LocalCategoryDecision("收入", "转账", 70, "AI:转账收入")
-            else -> LocalCategoryDecision("收入", "其他", 50, "AI:收入默认")
+            else -> LocalCategoryDecision("收入", "退款", 50, "AI:收入默认")
         }
     }
 

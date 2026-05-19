@@ -166,9 +166,7 @@ class CoinNestRepository(context: Context) {
             "社交" to "水电燃气",
             "收入" to "工资",
             "收入" to "奖金",
-            "收入" to "转账",
-            "收入" to "退款",
-            "收入" to "其他"
+            "收入" to "退款"
         )
         val db = dbHelper.writableDatabase
         var inserted = 0
@@ -179,6 +177,11 @@ class CoinNestRepository(context: Context) {
                 "categories",
                 "parent IN (?, ?, ?, ?, ?, ?, ?)",
                 arrayOf("交通", "学习", "生活", "理财", "购物", "娱乐", "工作")
+            )
+            deleted += db.delete(
+                "categories",
+                "parent = ? AND child IN (?, ?)",
+                arrayOf("收入", "转账", "其他")
             )
             defaults.forEach { (parent, child) ->
                 val values = ContentValues().apply {
@@ -1066,14 +1069,25 @@ class CoinNestRepository(context: Context) {
     }
 
     private fun queryCategories(): List<CategoryEntity> {
-        val cursor = dbHelper.readableDatabase.query(
-            "categories",
-            arrayOf("id", "parent", "child"),
-            null,
-            null,
-            null,
-            null,
-            "parent ASC, child ASC"
+        val cursor = dbHelper.readableDatabase.rawQuery(
+            """
+            SELECT id, parent, child
+            FROM categories
+            WHERE NOT (parent = '收入' AND child IN ('转账', '其他'))
+            ORDER BY
+                CASE parent
+                    WHEN '工作日' THEN 0
+                    WHEN '休息日' THEN 1
+                    WHEN '医疗' THEN 2
+                    WHEN '网购' THEN 3
+                    WHEN '社交' THEN 4
+                    WHEN '收入' THEN 5
+                    ELSE 20
+                END ASC,
+                parent ASC,
+                child ASC
+            """.trimIndent(),
+            emptyArray()
         )
         return cursor.use { c ->
             buildList {
