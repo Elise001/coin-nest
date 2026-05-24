@@ -34,18 +34,25 @@ internal enum class LocalSearchType(val title: String) {
     Income("收入")
 }
 
+internal enum class LocalSearchScope(val title: String) {
+    Month("本月"),
+    Year("本年")
+}
+
 @Composable
 internal fun LocalSearchControlCard(
     query: String,
     onQueryChange: (String) -> Unit,
     type: LocalSearchType,
-    onTypeChange: (LocalSearchType) -> Unit
+    onTypeChange: (LocalSearchType) -> Unit,
+    scope: LocalSearchScope,
+    onScopeChange: (LocalSearchScope) -> Unit
 ) {
     GlassCard {
         Text("本地找账", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            "搜索本年已加载流水，不联网、不上传。",
+            "搜索${scope.title}已加载流水，不联网、不上传。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -89,6 +96,37 @@ internal fun LocalSearchControlCard(
                 }
             }
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            LocalSearchScope.entries.forEach { item ->
+                val selected = item == scope
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+                        .border(
+                            width = 1.dp,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                            } else {
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onScopeChange(item) }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -96,6 +134,7 @@ internal fun LocalSearchControlCard(
 internal fun LocalSearchSummaryCard(
     query: String,
     results: List<TransactionEntity>,
+    scope: LocalSearchScope,
     hasMore: Boolean,
     onLoadMore: () -> Unit
 ) {
@@ -110,7 +149,7 @@ internal fun LocalSearchSummaryCard(
     }
     GlassCard {
         Text(
-            text = if (query.isBlank()) "当前展示本年已加载流水" else "找到 ${results.size} 条匹配流水",
+            text = if (query.isBlank()) "当前展示${scope.title}已加载流水" else "找到 ${results.size} 条匹配流水",
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold
         )

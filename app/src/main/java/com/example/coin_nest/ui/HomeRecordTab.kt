@@ -1,26 +1,18 @@
 ﻿package com.example.coin_nest.ui
 
 import android.app.DatePickerDialog
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -35,24 +27,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
-import com.example.coin_nest.autobook.PaymentActionNotifier
-import com.example.coin_nest.data.db.TransactionEntity
 import com.example.coin_nest.util.MoneyFormat
 import com.example.coin_nest.util.MoneyParser
-import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import kotlin.math.abs
@@ -76,7 +57,6 @@ internal fun RecordTab(
     var parentCategory by rememberSaveable { mutableStateOf("") }
     var childCategory by rememberSaveable { mutableStateOf("") }
     var selectedTemplateLabel by rememberSaveable { mutableStateOf("") }
-    var selectedCategoryShortcut by rememberSaveable { mutableStateOf("") }
     var selectedRecordDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
     var amountError by rememberSaveable { mutableStateOf<String?>(null) }
     var categoryError by rememberSaveable { mutableStateOf(false) }
@@ -159,7 +139,6 @@ internal fun RecordTab(
     }
     LaunchedEffect(isIncome) {
         selectedTemplateLabel = ""
-        selectedCategoryShortcut = ""
         quickFillMode = if (selectedRecordDate.dayOfWeek.value in 1..5) QuickFillMode.WORKDAY else QuickFillMode.RESTDAY
     }
 
@@ -210,7 +189,6 @@ internal fun RecordTab(
                     onSelect = { index ->
                         quickFillMode = if (index == 0) QuickFillMode.WORKDAY else QuickFillMode.RESTDAY
                         selectedTemplateLabel = ""
-                        selectedCategoryShortcut = ""
                     }
                 )
 
@@ -232,7 +210,6 @@ internal fun RecordTab(
                                 childCategory = tpl.child
                                 note = tpl.note
                                 selectedTemplateLabel = tpl.label
-                                selectedCategoryShortcut = ""
                                 amountError = null
                                 categoryError = false
                             }
@@ -280,7 +257,8 @@ internal fun RecordTab(
                     isError = amountError != null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     supportingText = {
-                        if (amountError != null) Text(amountError!!)
+                        val error = amountError
+                        if (error != null) Text(error)
                         else Text("支持整数与两位小数")
                     }
                 )
@@ -303,7 +281,6 @@ internal fun RecordTab(
                             onClick = {
                                 parentCategory = recommendedCategoryPair.first
                                 childCategory = recommendedCategoryPair.second
-                                selectedCategoryShortcut = "${recommendedCategoryPair.first}/${recommendedCategoryPair.second}"
                                 categoryError = false
                             }
                         )
@@ -405,7 +382,6 @@ internal fun RecordTab(
                         amount = ""
                         note = ""
                         selectedTemplateLabel = ""
-                        selectedCategoryShortcut = ""
                         showNoteField = false
                     },
                     modifier = Modifier
@@ -416,377 +392,5 @@ internal fun RecordTab(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun PendingAutoInboxCard(
-    review: PendingAutoReview,
-    onConfirmPendingAuto: (Long) -> Unit,
-    onIgnorePendingAuto: (Long) -> Unit
-) {
-    val context = LocalContext.current
-    fun clearNotifications(tx: TransactionEntity, pendingCountAfterAction: Int) {
-        NotificationManagerCompat.from(context).cancel(tx.id.toInt())
-        if (pendingCountAfterAction <= 0) {
-            PaymentActionNotifier.clearPendingAggregateNotification(context)
-        }
-    }
-
-    fun ignoreAll() {
-        review.all.forEach { tx ->
-            onIgnorePendingAuto(tx.id)
-            NotificationManagerCompat.from(context).cancel(tx.id.toInt())
-        }
-        PaymentActionNotifier.clearPendingAggregateNotification(context)
-    }
-
-    fun confirmRecommended() {
-        val targets = review.recommended.ifEmpty { review.all.takeIf { review.needsReview.isEmpty() && review.duplicates.isEmpty() }.orEmpty() }
-        targets.forEach { tx ->
-            onConfirmPendingAuto(tx.id)
-            NotificationManagerCompat.from(context).cancel(tx.id.toInt())
-        }
-        if (targets.size >= review.all.size) {
-            PaymentActionNotifier.clearPendingAggregateNotification(context)
-        }
-    }
-
-    fun mergeDuplicateGroups() {
-        val keepers = review.duplicateGroups.map { it.keep }
-        val duplicateItems = review.duplicateGroups.flatMap { it.duplicates }
-        keepers.forEach { tx ->
-            onConfirmPendingAuto(tx.id)
-            NotificationManagerCompat.from(context).cancel(tx.id.toInt())
-        }
-        duplicateItems.forEach { tx ->
-            onIgnorePendingAuto(tx.id)
-            NotificationManagerCompat.from(context).cancel(tx.id.toInt())
-        }
-        if (keepers.size + duplicateItems.size >= review.all.size) {
-            PaymentActionNotifier.clearPendingAggregateNotification(context)
-        }
-    }
-
-    GlassCard {
-        Text("待确认收件箱", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            "自动识别先入队，不逐笔打扰。建议检查项先看一眼，再批量处理。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MetricPill(label = "待确认", value = "${review.all.size}条", modifier = Modifier.weight(1f))
-            MetricPill(label = "建议检查", value = "${review.needsReview.size}条", modifier = Modifier.weight(1f))
-            MetricPill(label = "疑似重复", value = "${review.duplicates.size}条", modifier = Modifier.weight(1f))
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = ::ignoreAll, modifier = Modifier.weight(1f)) { Text("全部取消") }
-            Button(
-                onClick = ::confirmRecommended,
-                modifier = Modifier.weight(1f),
-                enabled = review.recommended.isNotEmpty() || (review.needsReview.isEmpty() && review.duplicates.isEmpty())
-            ) {
-                Text(if (review.recommended.isEmpty()) "全部确认" else "确认可确认")
-            }
-        }
-        if (review.duplicateGroups.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(onClick = ::mergeDuplicateGroups, modifier = Modifier.fillMaxWidth()) {
-                Text("合并疑似重复（保留最新）")
-            }
-        }
-
-        PendingSection(
-            title = "建议检查",
-            subtitle = "包含优惠、理财、红包等敏感词，建议确认后再入账",
-            items = review.needsReview,
-            totalPendingCount = review.all.size,
-            onConfirmPendingAuto = onConfirmPendingAuto,
-            onIgnorePendingAuto = onIgnorePendingAuto,
-            onClearNotifications = ::clearNotifications
-        )
-        PendingSection(
-            title = "疑似重复",
-            subtitle = "支付平台与银行卡可能同时捕获同一笔，建议只保留一条",
-            items = review.duplicates,
-            reasonLabel = "原因：金额、收支类型和时间接近",
-            totalPendingCount = review.all.size,
-            onConfirmPendingAuto = onConfirmPendingAuto,
-            onIgnorePendingAuto = onIgnorePendingAuto,
-            onClearNotifications = ::clearNotifications
-        )
-        PendingSection(
-            title = "可确认",
-            subtitle = "没有明显风险，可批量确认",
-            items = review.recommended,
-            totalPendingCount = review.all.size,
-            onConfirmPendingAuto = onConfirmPendingAuto,
-            onIgnorePendingAuto = onIgnorePendingAuto,
-            onClearNotifications = ::clearNotifications
-        )
-    }
-}
-
-@Composable
-private fun PendingSection(
-    title: String,
-    subtitle: String,
-    items: List<TransactionEntity>,
-    reasonLabel: String? = null,
-    totalPendingCount: Int,
-    onConfirmPendingAuto: (Long) -> Unit,
-    onIgnorePendingAuto: (Long) -> Unit,
-    onClearNotifications: (TransactionEntity, Int) -> Unit
-) {
-    if (items.isEmpty()) return
-    Spacer(modifier = Modifier.height(12.dp))
-    SectionTitle(title = "$title（${items.size}）", subtitle = subtitle)
-    Spacer(modifier = Modifier.height(8.dp))
-    items.take(6).forEachIndexed { index, tx ->
-        if (!reasonLabel.isNullOrBlank()) {
-            Text(
-                reasonLabel,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 2.dp, bottom = 4.dp)
-            )
-        }
-        PendingTransactionRow(
-            tx = tx,
-            onConfirm = {
-                onConfirmPendingAuto(tx.id)
-                onClearNotifications(tx, totalPendingCount - 1)
-            },
-            onIgnore = {
-                onIgnorePendingAuto(tx.id)
-                onClearNotifications(tx, totalPendingCount - 1)
-            }
-        )
-        if (index < items.lastIndex.coerceAtMost(5)) Spacer(modifier = Modifier.height(2.dp))
-    }
-    if (items.size > 6) {
-        Spacer(modifier = Modifier.height(4.dp))
-        Text("还有 ${items.size - 6} 条在队列中", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-private data class PendingAutoReview(
-    val all: List<TransactionEntity>,
-    val needsReview: List<TransactionEntity>,
-    val duplicateGroups: List<PendingDuplicateGroup>,
-    val duplicates: List<TransactionEntity>,
-    val recommended: List<TransactionEntity>
-)
-
-private data class PendingDuplicateGroup(
-    val keep: TransactionEntity,
-    val duplicates: List<TransactionEntity>
-)
-
-private fun buildPendingReviewGroups(items: List<TransactionEntity>): PendingAutoReview {
-    val sensitive = items.filter { looksRiskyPendingAuto(it) }.toSet()
-    val duplicateGroups = items
-        .filterNot { it in sensitive }
-        .groupBy { pendingDuplicateKey(it) }
-        .values
-        .filter { group -> group.size > 1 }
-        .map { group ->
-            val sorted = group.sortedByDescending { it.createdAtEpochMs }
-            PendingDuplicateGroup(keep = sorted.first(), duplicates = sorted.drop(1))
-        }
-    val duplicateIds = duplicateGroups
-        .flatMap { it.duplicates }
-        .map { it.id }
-        .toSet()
-    val duplicates = duplicateGroups.flatMap { it.duplicates }
-    val recommended = items.filter { it !in sensitive && it.id !in duplicateIds }
-    return PendingAutoReview(
-        all = items,
-        needsReview = items.filter { it in sensitive },
-        duplicateGroups = duplicateGroups,
-        duplicates = duplicates,
-        recommended = recommended
-    )
-}
-
-private fun looksRiskyPendingAuto(tx: TransactionEntity): Boolean {
-    val text = "${tx.note} ${tx.parentCategory} ${tx.childCategory}"
-    val sensitiveKeywords = listOf(
-        "优惠券", "券包", "卡券", "红包", "积分", "余额宝", "基金", "理财", "申购", "赎回", "收益", "分红", "净值",
-        "持仓", "体验金", "确认份额", "买入成功", "卖出成功"
-    )
-    return sensitiveKeywords.any { text.contains(it, ignoreCase = true) }
-}
-
-private fun pendingDuplicateKey(tx: TransactionEntity): String {
-    val minuteBucket = Instant.ofEpochMilli(tx.occurredAtEpochMs).epochSecond / 120
-    return "${pendingDuplicateSourceGroup(tx.source)}|${tx.type}|${tx.amountCents}|$minuteBucket"
-}
-
-private fun pendingDuplicateSourceGroup(source: String): String {
-    return when (source.uppercase()) {
-        "ALIPAY", "WECHAT", "BANK_CARD", "CREDIT_CARD", "UNIONPAY" -> "PAYMENT_RAIL"
-        else -> source.uppercase()
-    }
-}
-
-@Composable
-private fun RecordMomentumCard(
-    todayExpense: Long,
-    monthExpense: Long,
-    pendingCount: Int,
-    isIncome: Boolean,
-    amount: String
-) {
-    val parsed = remember(amount) { MoneyParser.parseYuanToCents(amount) }
-    GlassCard {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.primary)
-                .padding(14.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = if (isIncome) "正在记录收入" else "正在记录支出",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Text(
-                            text = parsed?.let { "当前金额 ${MoneyFormat.fromCents(it)}" } ?: "先点快捷金额，或直接输入",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(MaterialTheme.colorScheme.secondary)
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = if (pendingCount > 0) "待确认 $pendingCount" else "无待办",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondary
-                        )
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RecordHeroMetric("今日支出", MoneyFormat.fromCents(todayExpense), Modifier.weight(1f))
-                    RecordHeroMetric("本月支出", MoneyFormat.fromCents(monthExpense), Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecordHeroMetric(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.13f))
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f), fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(3.dp))
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-    }
-}
-
-@Composable
-private fun SegmentedSelector(
-    options: List<String>,
-    selectedIndex: Int,
-    onSelect: (Int) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f), RoundedCornerShape(10.dp))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        options.forEachIndexed { index, text ->
-            val selected = index == selectedIndex
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .heightIn(min = 44.dp)
-                    .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
-                    .border(
-                        width = 1.dp,
-                        color = if (selected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.22f),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .semantics {
-                        role = Role.Tab
-                        this.selected = selected
-                    }
-                    .clickable { onSelect(index) }
-                    .padding(vertical = 9.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = text,
-                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickActionChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .defaultMinSize(minHeight = 44.dp)
-            .background(
-                if (selected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surface
-            )
-            .border(
-                1.dp,
-                if (selected) MaterialTheme.colorScheme.secondary
-                else MaterialTheme.colorScheme.outline.copy(alpha = 0.34f),
-                RoundedCornerShape(999.dp)
-            )
-            .semantics {
-                role = Role.Button
-                this.selected = selected
-            }
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 10.dp)
-    ) {
-        Text(
-            text = label,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
-        )
     }
 }

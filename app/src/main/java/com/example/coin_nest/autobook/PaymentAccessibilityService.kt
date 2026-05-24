@@ -61,96 +61,42 @@ class PaymentAccessibilityService : AccessibilityService() {
                 packageName = pkg,
                 reason = "$eventClass | raw=${merged.take(760)}"
             )
-            val aiDecision = AutoBookAiDecisionLayer.assess(pkg, merged)
-            AutoBookTelemetry.track(
-                applicationContext,
-                event = if (aiDecision.accepted) "ai_decision_accept" else "ai_decision_reject",
-                packageName = pkg,
-                reason = "ACCESS ${aiDecision.kind} ${aiDecision.confidence} ${aiDecision.reason} | raw=${merged.take(720)}"
-            )
-            if (!aiDecision.accepted) {
-                AutoBookTelemetry.track(
-                    applicationContext,
-                    event = "accessibility_drop",
-                    packageName = pkg,
-                    reason = "AI_${aiDecision.kind}_${aiDecision.confidence} | raw=${merged.take(720)}"
-                )
-                return
-            }
-
-            if (isDuplicateRawSnapshot(pkg, eventClass, merged)) {
-                AutoBookTelemetry.track(
-                    applicationContext,
-                    event = "accessibility_drop",
-                    packageName = pkg,
-                    reason = "RAW_DUPLICATE_WINDOW | raw=${merged.take(720)}"
-                )
-                return
-            }
-
-            AutoBookTelemetry.track(
-                applicationContext,
-                event = "accessibility_parse_start",
-                packageName = pkg,
-                reason = eventClass
-            )
-
-            val parsedResult = PaymentNotificationParser.parseWithDebug(
-                packageName = pkg,
-                title = eventClass,
-                text = merged,
-                postTime = System.currentTimeMillis(),
-                aiDecisionOverride = aiDecision
-            )
-            val parsed = parsedResult.payment ?: run {
-                AutoBookTelemetry.track(
-                    applicationContext,
-                    event = "accessibility_parse_failed",
-                    packageName = pkg,
-                    reason = "${parsedResult.reason} | raw=${merged.take(720)}"
-                )
-                return
-            }
-            AutoBookTelemetry.trackRecognizedPayment(
-                context = applicationContext,
-                packageName = pkg,
-                channel = "ACCESS",
-                payment = parsed
-            )
-
-            if (isDuplicateLogicalPayment(parsed, merged)) {
-                AutoBookTelemetry.track(
-                    applicationContext,
-                    event = "accessibility_drop",
-                    packageName = pkg,
-                    reason = "ACCESS_DUPLICATE_WINDOW | raw=${merged.take(720)}"
-                )
-                return
-            }
-
             scope.launch {
-                val insertResult = ServiceLocator.repository().addAutoTransaction(
-                    amountCents = parsed.amountCents,
-                    type = parsed.type,
-                    source = parsed.source,
-                    note = parsed.note,
-                    fingerprint = parsed.fingerprint,
-                    occurredAtEpochMs = parsed.occurredAtEpochMs,
-                    channel = "ACCESS",
-                    parent = parsed.parentCategory,
-                    child = parsed.childCategory
-                )
-                when {
-                    insertResult.insertedId != null && insertResult.shouldNotify -> {
-                        AutoBookTelemetry.track(
-                            applicationContext,
-                            event = "accessibility_insert_success",
+                runCatching {
+                    AutoBookProcessor.process(
+                        context = applicationContext,
+                        repository = ServiceLocator.repository(),
+                        event = AutoBookRawEvent(
                             packageName = pkg,
-                            reason = insertResult.reason
-                        )
+                            title = eventClass,
+                            text = merged,
+                            occurredAtEpochMs = System.currentTimeMillis(),
+                            channel = AutoBookChannel.ACCESS
+                        ),
+                        shouldDropBeforeParse = {
+                            if (isDuplicateRawSnapshot(pkg, eventClass, merged)) {
+                                "RAW_DUPLICATE_WINDOW"
+                            } else {
+                                null
+                            }
+                        },
+                        shouldDropBeforeInsert = { parsed ->
+                            if (isDuplicateLogicalPayment(parsed, merged)) {
+                                "ACCESS_DUPLICATE_WINDOW"
+                            } else {
+                                null
+                            }
+                        }
+                    )
+                }.onSuccess { result ->
+                    if (result is AutoBookProcessResult.Inserted &&
+                        result.insertResult.insertedId != null &&
+                        result.insertResult.shouldNotify
+                    ) {
+                        val parsed = result.payment
                         PaymentActionNotifier.notifyPendingPayment(
                             context = applicationContext,
-                            txId = insertResult.insertedId,
+                            txId = result.insertResult.insertedId,
                             amountCents = parsed.amountCents,
                             type = parsed.type.name,
                             source = parsed.source,
@@ -159,14 +105,14 @@ class PaymentAccessibilityService : AccessibilityService() {
                         showAutoDetectedToast()
                         debugPopup("无障碍记账成功")
                     }
-                    else -> {
-                        AutoBookTelemetry.track(
-                            applicationContext,
-                            event = "accessibility_insert_drop",
-                            packageName = pkg,
-                            reason = insertResult.reason
-                        )
-                    }
+                }.onFailure {
+                    AutoBookTelemetry.track(
+                        applicationContext,
+                        event = "accessibility_error",
+                        packageName = pkg,
+                        reason = it.message ?: it.javaClass.simpleName
+                    )
+                    Log.e("AutoBookDebug", "accessibility processing failed", it)
                 }
             }
         }.onFailure {
@@ -192,7 +138,7 @@ class PaymentAccessibilityService : AccessibilityService() {
 
     private fun buildMergedContent(event: AccessibilityEvent, root: AccessibilityNodeInfo?): String {
         val chunks = mutableListOf<String>()
-        event.text?.forEach { cs ->
+        event.text.forEach { cs ->
             cs?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { chunks += it }
         }
         root?.let { collectText(it, chunks, depth = 0) }
@@ -209,7 +155,6 @@ class PaymentAccessibilityService : AccessibilityService() {
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             collectText(child, out, depth + 1)
-            child.recycle()
         }
     }
 

@@ -65,96 +65,60 @@ class PaymentNotificationListener : NotificationListenerService() {
             val summaryTag = if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) "[SUMMARY]" else ""
             debugPopup("PAYMENT_NOTIFY$summaryTag: $packageName ${title.orEmpty().take(12)}")
 
-            val decisionText = listOfNotNull(title, text)
-                .joinToString(" ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-            val aiDecision = AutoBookAiDecisionLayer.assess(packageName, decisionText)
-            AutoBookTelemetry.track(
-                applicationContext,
-                event = if (aiDecision.accepted) "ai_decision_accept" else "ai_decision_reject",
-                packageName = packageName,
-                reason = "NOTIFY ${aiDecision.kind} ${aiDecision.confidence} ${aiDecision.reason} | raw=${decisionText.take(720)}"
-            )
-            if (!aiDecision.accepted) {
-                debugPopup("IGNORE_NOTIFY($packageName): ${aiDecision.reason}")
-                return
-            }
-
-            val parsedResult = PaymentNotificationParser.parseWithDebug(
-                packageName,
-                title,
-                text,
-                sbn.postTime,
-                aiDecisionOverride = aiDecision
-            )
-            val parsed = parsedResult.payment
-            if (parsed == null) {
-                AutoBookTelemetry.track(
-                    applicationContext,
-                    event = "parse_failed",
-                    packageName = packageName,
-                    reason = "${parsedResult.reason} | raw=$preview"
-                )
-                debugPopup("IGNORE_NOTIFY($packageName): ${parsedResult.reason}")
-                return
-            }
-            AutoBookTelemetry.trackRecognizedPayment(
-                context = applicationContext,
-                packageName = packageName,
-                channel = "NOTIFY",
-                payment = parsed
-            )
-
             scope.launch {
-                val insertResult = ServiceLocator.repository().addAutoTransaction(
-                    amountCents = parsed.amountCents,
-                    type = parsed.type,
-                    source = parsed.source,
-                    note = parsed.note,
-                    fingerprint = parsed.fingerprint,
-                    occurredAtEpochMs = parsed.occurredAtEpochMs,
-                    channel = "NOTIFY",
-                    parent = parsed.parentCategory,
-                    child = parsed.childCategory
-                )
-                when {
-                    insertResult.insertedId != null && insertResult.shouldNotify -> {
-                        AutoBookTelemetry.track(
-                            applicationContext,
-                            event = "insert_success",
+                runCatching {
+                    AutoBookProcessor.process(
+                        context = applicationContext,
+                        repository = ServiceLocator.repository(),
+                        event = AutoBookRawEvent(
                             packageName = packageName,
-                            reason = insertResult.reason
+                            title = title,
+                            text = text,
+                            occurredAtEpochMs = sbn.postTime,
+                            channel = AutoBookChannel.NOTIFY
                         )
-                        showAutoDetectedToast()
-                        debugPopup("AUTOBOOK_OK: ${parsed.source} ${parsed.amountCents / 100.0}")
-                        PaymentActionNotifier.notifyPendingPayment(
-                            context = applicationContext,
-                            txId = insertResult.insertedId,
-                            amountCents = parsed.amountCents,
-                            type = parsed.type.name,
-                            source = parsed.source,
-                            note = parsed.note
-                        )
+                    )
+                }.onSuccess { result ->
+                    when (result) {
+                        is AutoBookProcessResult.Rejected -> {
+                            debugPopup("IGNORE_NOTIFY($packageName): ${result.reason}")
+                        }
+                        is AutoBookProcessResult.Dropped -> {
+                            debugPopup("AUTOBOOK_DROP: reason=${result.reason}")
+                        }
+                        is AutoBookProcessResult.Inserted -> {
+                            val insertResult = result.insertResult
+                            val parsed = result.payment
+                            when {
+                                insertResult.insertedId != null && insertResult.shouldNotify -> {
+                                    showAutoDetectedToast()
+                                    debugPopup("AUTOBOOK_OK: ${parsed.source} ${parsed.amountCents / 100.0}")
+                                    PaymentActionNotifier.notifyPendingPayment(
+                                        context = applicationContext,
+                                        txId = insertResult.insertedId,
+                                        amountCents = parsed.amountCents,
+                                        type = parsed.type.name,
+                                        source = parsed.source,
+                                        note = parsed.note
+                                    )
+                                }
+                                insertResult.insertedId != null -> {
+                                    debugPopup("AUTOBOOK_LINKED: reason=${insertResult.reason}")
+                                }
+                                else -> {
+                                    debugPopup("AUTOBOOK_DROP: reason=${insertResult.reason}")
+                                }
+                            }
+                        }
                     }
-                    insertResult.insertedId != null -> {
-                        AutoBookTelemetry.track(
-                            applicationContext,
-                            event = "insert_linked",
-                            packageName = packageName,
-                            reason = insertResult.reason
-                        )
-                        debugPopup("AUTOBOOK_LINKED: reason=${insertResult.reason}")
-                    }
-                    else -> {
-                        AutoBookTelemetry.track(
-                            applicationContext,
-                            event = "insert_drop",
-                            packageName = packageName,
-                            reason = insertResult.reason
-                        )
-                        debugPopup("AUTOBOOK_DROP: reason=${insertResult.reason}")
-                    }
+                }.onFailure { error ->
+                    AutoBookTelemetry.track(
+                        applicationContext,
+                        event = "listener_error",
+                        packageName = packageName,
+                        reason = error.message ?: error.javaClass.simpleName
+                    )
+                    Log.e("AutoBookDebug", "notification processing failed", error)
                 }
             }
         }.onFailure { error ->
@@ -209,82 +173,6 @@ class PaymentNotificationListener : NotificationListenerService() {
             runCatching {
                 Toast.makeText(applicationContext, "自动记账已识别，已放入待确认", Toast.LENGTH_SHORT).show()
             }
-        }
-    }
-
-    private fun mapDebugMessageToChinese(raw: String): String {
-        if (raw.startsWith("AUTOBK service started")) return "自动记账监听服务已启动"
-        if (raw.startsWith("AUTOBK service destroyed")) return "自动记账监听服务已停止"
-        if (raw.startsWith("Listener connected")) return "通知监听已连接"
-        if (raw.startsWith("Listener disconnected")) return "通知监听已断开，正在重连"
-
-        if (raw.startsWith("PAYMENT_NOTIFY")) {
-            val pkg = raw.substringAfter(": ", "").substringBefore(" ").trim()
-            return "收到支付通知：${mapPackageLabel(pkg)}"
-        }
-        if (raw.startsWith("IGNORE_NOTIFY")) {
-            val reason = raw.substringAfter(": ", "")
-            return "忽略通知：${mapReasonToChinese(reason)}"
-        }
-        if (raw.startsWith("AUTOBOOK_OK")) {
-            val source = raw.substringAfter(": ", "").substringBefore(" ").trim()
-            return "自动记账成功：${mapSourceLabel(source)}"
-        }
-        if (raw.startsWith("AUTOBOOK_LINKED")) {
-            val reason = raw.substringAfter("reason=", "")
-            return "自动记账已关联：${mapReasonToChinese(reason)}"
-        }
-        if (raw.startsWith("AUTOBOOK_DROP")) {
-            val reason = raw.substringAfter("reason=", "")
-            return "自动记账未入库：${mapReasonToChinese(reason)}"
-        }
-        return raw
-    }
-
-    private fun mapSourceLabel(source: String): String {
-        return when (source.uppercase()) {
-            "ALIPAY" -> "支付宝"
-            "WECHAT" -> "微信"
-            "TAOBAO" -> "淘宝"
-            "MEITUAN" -> "美团"
-            "JD" -> "京东"
-            "PDD" -> "拼多多"
-            "UNIONPAY" -> "云闪付"
-            "BANK_CARD" -> "银行卡"
-            "CREDIT_CARD" -> "信用卡"
-            else -> source
-        }
-    }
-
-    private fun mapPackageLabel(pkg: String): String {
-        return when (pkg) {
-            "com.eg.android.AlipayGphone" -> "支付宝"
-            "com.tencent.mm" -> "微信"
-            "com.taobao.taobao" -> "淘宝"
-            "com.jingdong.app.mall" -> "京东"
-            "com.xunmeng.pinduoduo" -> "拼多多"
-            "com.sankuai.meituan" -> "美团"
-            "com.unionpay" -> "云闪付"
-            "cmb.pb", "com.chinamworld.main", "com.icbc" -> "银行卡"
-            else -> pkg
-        }
-    }
-
-    private fun mapReasonToChinese(reason: String): String {
-        val text = reason.trim()
-        val upper = text.uppercase()
-        return when {
-            upper.contains("SAME_SOURCE_DUPLICATE_BY_TXN_REF") -> "同源重复（同交易号）"
-            upper.contains("AUTO_DUPLICATE_BY_WINDOW") -> "短时间重复自动记账"
-            upper.contains("DUPLICATE_OR_CONFLICT") -> "重复或数据库冲突"
-            upper.contains("AI_RELATED_LINKED") || upper.contains("CROSS_SOURCE_LINKED") -> "跨渠道关联（已合并）"
-            upper.contains("INSERTED") -> "已入库"
-            upper.contains("命中噪声关键词") -> "命中噪声关键词"
-            upper.contains("未提取到有效金额") -> "未提取到有效金额"
-            upper.contains("无法判断收支类型") -> "无法判断收支类型"
-            upper.contains("空通知内容") -> "通知内容为空"
-            upper.contains("非支付渠道包名") -> "非支付渠道通知"
-            else -> text.take(24)
         }
     }
 
