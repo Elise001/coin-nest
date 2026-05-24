@@ -3,6 +3,7 @@ package com.example.coin_nest.data
 import com.example.coin_nest.data.model.TransactionType
 import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -30,7 +31,7 @@ object LocalCategoryAi {
 
         val localDateTime = Instant.ofEpochMilli(occurredAtEpochMs).atZone(zone)
         val time = localDateTime.toLocalTime()
-        val isRestDay = localDateTime.dayOfWeek in setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)
+        val isRestDay = isRestDay(localDateTime.toLocalDate())
 
         if (!isRestDay) {
             if (source.looksLikePaymentApp() && amountCents in 300L..800L && time in COMMUTE_WINDOW) {
@@ -50,7 +51,7 @@ object LocalCategoryAi {
 
     fun learningTokens(source: String, amountCents: Long, occurredAtEpochMs: Long): List<String> {
         val localDateTime = Instant.ofEpochMilli(occurredAtEpochMs).atZone(zone)
-        val dayToken = if (localDateTime.dayOfWeek in setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)) {
+        val dayToken = if (isRestDay(localDateTime.toLocalDate())) {
             "DAY_REST"
         } else {
             "DAY_WORK"
@@ -107,6 +108,11 @@ object LocalCategoryAi {
         return keywords.any { contains(it, ignoreCase = true) }
     }
 
+    private fun isRestDay(date: LocalDate): Boolean {
+        if (date.dayOfWeek in setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)) return true
+        return date in chinaPublicHolidayOverrides
+    }
+
     private operator fun ClosedRange<LocalTime>.contains(time: LocalTime): Boolean {
         return !time.isBefore(start) && !time.isAfter(endInclusive)
     }
@@ -114,4 +120,35 @@ object LocalCategoryAi {
     private val COMMUTE_WINDOW = LocalTime.of(6, 30)..LocalTime.of(9, 45)
     private val LUNCH_WINDOW = LocalTime.of(10, 30)..LocalTime.of(14, 0)
     private val REST_OUTING_WINDOW = LocalTime.of(10, 0)..LocalTime.of(22, 30)
+    private val chinaPublicHolidayOverrides = setOf(
+        LocalDate.of(2026, 1, 1),
+        LocalDate.of(2026, 2, 16),
+        LocalDate.of(2026, 2, 17),
+        LocalDate.of(2026, 2, 18),
+        LocalDate.of(2026, 2, 19),
+        LocalDate.of(2026, 2, 20),
+        LocalDate.of(2026, 2, 21),
+        LocalDate.of(2026, 2, 22),
+        LocalDate.of(2026, 4, 4),
+        LocalDate.of(2026, 4, 5),
+        LocalDate.of(2026, 4, 6),
+        LocalDate.of(2026, 5, 1),
+        LocalDate.of(2026, 5, 2),
+        LocalDate.of(2026, 5, 3),
+        LocalDate.of(2026, 5, 4),
+        LocalDate.of(2026, 5, 5),
+        LocalDate.of(2026, 6, 19),
+        LocalDate.of(2026, 6, 20),
+        LocalDate.of(2026, 6, 21),
+        LocalDate.of(2026, 9, 25),
+        LocalDate.of(2026, 9, 26),
+        LocalDate.of(2026, 9, 27),
+        LocalDate.of(2026, 10, 1),
+        LocalDate.of(2026, 10, 2),
+        LocalDate.of(2026, 10, 3),
+        LocalDate.of(2026, 10, 4),
+        LocalDate.of(2026, 10, 5),
+        LocalDate.of(2026, 10, 6),
+        LocalDate.of(2026, 10, 7)
+    )
 }

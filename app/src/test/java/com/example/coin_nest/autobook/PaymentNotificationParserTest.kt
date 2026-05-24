@@ -4,6 +4,7 @@ import com.example.coin_nest.data.model.TransactionType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PaymentNotificationParserTest {
@@ -121,6 +122,58 @@ class PaymentNotificationParserTest {
         assertNotNull(parsed)
         assertEquals(1270L, parsed!!.amountCents)
         assertEquals(TransactionType.EXPENSE, parsed.type)
+    }
+
+    @Test
+    fun `prefer actual paid amount over original price and instant discount`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.eg.android.AlipayGphone",
+            title = "支付宝",
+            text = "支付成功 回首页 ￥2.41 获得森林能量 某商户 ￥2.50 碰一下立减 -￥0.09 付款方式 招商银行信用卡(4921) 完成",
+            postTime = 1_716_000_000_000
+        )
+
+        assertNotNull(parsed)
+        assertEquals(241L, parsed!!.amountCents)
+        assertTrue(parsed.note.contains("识别金额: ¥2.41"))
+    }
+
+    @Test
+    fun `ignore chat text containing date and standalone number`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.tencent.mm",
+            title = "微信",
+            text = "月上眉梢头像 没有 就上次我发给你的水电 月上眉梢头像 也没人通知我到账了 月上眉梢头像 应该是27号的约3退租 月上眉梢头像",
+            postTime = 1_716_000_000_000
+        )
+
+        assertNull(parsed)
+    }
+
+    @Test
+    fun `ignore sesame weekly report numbers`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.eg.android.AlipayGphone",
+            title = "支付宝",
+            text = "芝麻周报 0511-0517 周报 分享 我的芝麻分 830 分 本周评分 2 分 已超越全国99.09%的用户 行为积累 15次 +135",
+            postTime = 1_716_000_000_000
+        )
+
+        assertNull(parsed)
+    }
+
+    @Test
+    fun `ignore zero yuan reminder and choose real card consumption amount`() {
+        val debug = PaymentNotificationParser.parseWithDebug(
+            packageName = "com.eg.android.AlipayGphone",
+            title = "支付宝 交易提醒",
+            text = "09:54 你有一笔0.00元的支出，点此查看详情。招商银行 09:54 信用卡通知：您尾号4921的招商信用卡消费50.00人民币。9:54 设置 5月23日 周六 中国移动",
+            postTime = 1_716_000_000_000
+        )
+        val parsed = debug.payment
+
+        assertNotNull(debug.reason, parsed)
+        assertEquals(5_000L, parsed!!.amountCents)
     }
 
     @Test

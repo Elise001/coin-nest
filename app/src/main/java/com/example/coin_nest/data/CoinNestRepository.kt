@@ -725,7 +725,10 @@ class CoinNestRepository(context: Context) {
             occurredAtEpochMs = occurredAtEpochMs
         ).toSet()
         val learnedSuggestion = rules
-            .filter { rule -> normalizedNote.contains(rule.keyword) || behaviorKeywords.contains(rule.keyword) }
+            .filter { rule ->
+                !rule.keyword.isGenericAutoLearningToken() &&
+                    (normalizedNote.contains(rule.keyword) || behaviorKeywords.contains(rule.keyword))
+            }
             .maxWithOrNull(
                 compareByDescending<SmartCategoryRuleEntity> { it.hitCount }
                     .thenByDescending { it.keyword.length }
@@ -859,8 +862,28 @@ class CoinNestRepository(context: Context) {
         )
         val matched = seedKeywords.filter { normalized.contains(it.lowercase()) }
         if (matched.isNotEmpty()) return matched.take(3).map { it.lowercase() }
-        val short = normalized.split(" ").firstOrNull { it.length in 2..10 } ?: return listOf(source.lowercase())
+        val short = normalized.split(" ").firstOrNull { token ->
+            token.length in 2..10 && !token.isGenericAutoLearningToken()
+        } ?: return listOf(source.lowercase()).filterNot { it.isGenericAutoLearningToken() }
         return listOf(short)
+    }
+
+    private fun String.isGenericAutoLearningToken(): Boolean {
+        val token = lowercase()
+        return token in setOf(
+            "android",
+            "widget",
+            "layout",
+            "framelayout",
+            "linearlayout",
+            "relativelayout",
+            "textview",
+            "button",
+            "view",
+            "alipay",
+            "wechat",
+            "auto_notify"
+        )
     }
 
     private fun normalizeNote(note: String): String {

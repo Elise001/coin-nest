@@ -118,6 +118,8 @@ fun HomeScreen(
 ) {
     var selectedMainTab by rememberSaveable { mutableIntStateOf(initialMainTabIndex.coerceIn(0, MainTab.entries.size - 1)) }
     var insightOpenMonthDetailToken by rememberSaveable { mutableIntStateOf(0) }
+    var insightOpenSearchToken by rememberSaveable { mutableIntStateOf(0) }
+    var insightOpenSearchType by rememberSaveable { mutableIntStateOf(LocalSearchType.All.ordinal) }
     var settingsOpenBudgetToken by rememberSaveable { mutableIntStateOf(0) }
     val mainTabs = remember { MainTab.entries }
     val pageBackground = MaterialTheme.colorScheme.background
@@ -156,6 +158,20 @@ fun HomeScreen(
                         onOpenInsightMonthCalendar = {
                             selectedMainTab = MainTab.Insight.ordinal
                             insightOpenMonthDetailToken++
+                        },
+                        onOpenIncomeSearch = {
+                            selectedMainTab = MainTab.Insight.ordinal
+                            insightOpenSearchType = LocalSearchType.Income.ordinal
+                            insightOpenSearchToken++
+                        },
+                        onOpenExpenseSearch = {
+                            selectedMainTab = MainTab.Insight.ordinal
+                            insightOpenSearchType = LocalSearchType.Expense.ordinal
+                            insightOpenSearchToken++
+                        },
+                        onOpenBudgetSettings = {
+                            selectedMainTab = MainTab.Profile.ordinal
+                            settingsOpenBudgetToken++
                         }
                     )
                     MainTab.Record -> RecordTab(state, onAddTransaction, onConfirmPendingAuto, onIgnorePendingAuto)
@@ -168,6 +184,9 @@ fun HomeScreen(
                         onLoadMoreYearTransactions = onLoadMoreYearTransactions,
                         openMonthDetailAtTodayToken = insightOpenMonthDetailToken,
                         onMonthDetailJumpHandled = { insightOpenMonthDetailToken = 0 },
+                        openSearchAtToken = insightOpenSearchToken,
+                        openSearchType = LocalSearchType.entries.getOrElse(insightOpenSearchType) { LocalSearchType.All },
+                        onSearchJumpHandled = { insightOpenSearchToken = 0 },
                         onOpenBudgetSettings = {
                             selectedMainTab = MainTab.Profile.ordinal
                             settingsOpenBudgetToken++
@@ -204,7 +223,6 @@ private fun BottomMainTabs(
     val tabSelectedColor = Sky700
     val tabUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
     val tabActiveBgColor = Sky200
-    val tabActiveStrokeColor = Sky500.copy(alpha = 0.42f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -212,18 +230,9 @@ private fun BottomMainTabs(
             .navigationBarsPadding()
             .padding(horizontal = 10.dp, vertical = 7.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
-                .align(Alignment.TopStart)
-        )
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 3.dp)
         ) {
             tabs.forEachIndexed { index, tab ->
                 val selected = index == selectedIndex
@@ -251,11 +260,6 @@ private fun BottomMainTabs(
                         }
                         .clip(RoundedCornerShape(14.dp))
                         .background(if (selected) tabActiveBgColor else MaterialTheme.colorScheme.surface)
-                        .border(
-                            width = 1.dp,
-                            color = if (selected) tabActiveStrokeColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
-                            shape = RoundedCornerShape(14.dp)
-                        )
                         .semantics {
                             role = Role.Tab
                             this.selected = selected
@@ -316,7 +320,10 @@ private fun HomeDashboardTab(
     onOpenRecord: () -> Unit,
     onOpenInsight: () -> Unit,
     onUpdateTransaction: (Long, String, String, String) -> Unit,
-    onOpenInsightMonthCalendar: () -> Unit
+    onOpenInsightMonthCalendar: () -> Unit,
+    onOpenIncomeSearch: () -> Unit,
+    onOpenExpenseSearch: () -> Unit,
+    onOpenBudgetSettings: () -> Unit
 ) {
     val anomalies = remember(
         state.monthTransactions,
@@ -353,7 +360,10 @@ private fun HomeDashboardTab(
                 budget = state.monthBudgetCents,
                 pendingCount = state.pendingAutoTransactions.size,
                 onRecord = onOpenRecord,
-                onOpenCalendar = onOpenInsightMonthCalendar
+                onOpenCalendar = onOpenInsightMonthCalendar,
+                onOpenIncome = onOpenIncomeSearch,
+                onOpenExpense = onOpenExpenseSearch,
+                onOpenBudgetSettings = onOpenBudgetSettings
             )
         }
         item {
@@ -476,7 +486,10 @@ private fun MoneyHeroCard(
     budget: Long?,
     pendingCount: Int,
     onRecord: () -> Unit,
-    onOpenCalendar: () -> Unit
+    onOpenCalendar: () -> Unit,
+    onOpenIncome: () -> Unit,
+    onOpenExpense: () -> Unit,
+    onOpenBudgetSettings: () -> Unit
 ) {
     val budgetRatio = if (budget != null && budget > 0L) {
         expense.toFloat() / budget.toFloat()
@@ -553,8 +566,8 @@ private fun MoneyHeroCard(
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MoneyHeroMetric("收入", MoneyFormat.fromCents(income), SuccessColor, Modifier.weight(1f))
-                MoneyHeroMetric("支出", MoneyFormat.fromCents(expense), DangerColor, Modifier.weight(1f))
+                MoneyHeroMetric("收入", MoneyFormat.fromCents(income), SuccessColor, Modifier.weight(1f), onClick = onOpenIncome)
+                MoneyHeroMetric("支出", MoneyFormat.fromCents(expense), DangerColor, Modifier.weight(1f), onClick = onOpenExpense)
                 MoneyHeroMetric("净值", MoneyFormat.fromCents(balance), heroTextColor, Modifier.weight(1f))
             }
 
@@ -574,8 +587,10 @@ private fun MoneyHeroCard(
                         )
                         Text(
                             text = budget?.let { "${(budgetRatio * 100).toInt()}%" } ?: "去我的页设置",
+                            modifier = if (budget == null) Modifier.clickable { onOpenBudgetSettings() } else Modifier,
                             style = MaterialTheme.typography.bodySmall,
-                            color = heroSubtleColor
+                            color = if (budget == null) Sky700 else heroSubtleColor,
+                            fontWeight = if (budget == null) FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
                     Box(
@@ -646,11 +661,18 @@ private fun MoneyHeroCard(
 }
 
 @Composable
-private fun MoneyHeroMetric(label: String, value: String, accent: Color, modifier: Modifier = Modifier) {
+private fun MoneyHeroMetric(
+    label: String,
+    value: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(Color.White.copy(alpha = 0.76f))
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

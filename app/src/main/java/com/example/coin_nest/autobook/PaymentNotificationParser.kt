@@ -136,7 +136,7 @@ object PaymentNotificationParser {
         val type = inferType(merged, amountMatch.hasMinusSign, source)
             ?: return PaymentParseDebugResult(null, "无法判断收支类型")
         val (parentCategory, childCategory) = suggestCategory(merged, type)
-        val note = merged.take(140)
+        val note = appendRecognizedAmount(merged.take(140), cents)
         val transactionRef = extractTransactionRef(merged)
         val fingerprint = buildSameSourceFingerprint(source = source, transactionRef = transactionRef)
 
@@ -232,7 +232,7 @@ private fun extractAmount(merged: String): ParsedAmount? {
     if (candidates.isEmpty()) return null
 
     val best = candidates.maxByOrNull { scoreAmountCandidate(merged, it) } ?: return null
-    if (scoreAmountCandidate(merged, best) <= 0) return null
+    if (scoreAmountCandidate(merged, best) < 5) return null
     return ParsedAmount(best.cents, best.hasMinusSign)
 }
 
@@ -269,9 +269,12 @@ private fun scoreAmountCandidate(merged: String, candidate: AmountCandidate): In
     ) {
         score += 8
     }
+    if (candidate.cents == 0L) score -= 100
     if (hasDecimal) score += 6
     if (amountContextKeywords.any { context.contains(it, ignoreCase = true) }) score += 5
     if (preferredPaymentAmountContextKeywords.any { widerContext.contains(it, ignoreCase = true) }) score += 8
+    if (isFirstSettlementAmount(merged, candidate)) score += 18
+    if (isAfterDiscountText(merged, candidate.index)) score -= 12
     if (discountAmountContextKeywords.any { widerContext.contains(it, ignoreCase = true) }) score -= 14
     if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) score += 2
     if (isLikelyAccountNumber(merged, candidate.raw, candidate.index)) score -= 12
@@ -280,7 +283,40 @@ private fun scoreAmountCandidate(merged: String, candidate: AmountCandidate): In
     return score
 }
 
+private fun isFirstSettlementAmount(merged: String, candidate: AmountCandidate): Boolean {
+    val settlementIndex = listOf("支付成功", "付款成功", "成功付款", "交易提醒", "信用卡通知", "消费")
+        .map { merged.indexOf(it, ignoreCase = true) }
+        .filter { it >= 0 }
+        .minOrNull() ?: return false
+    if (candidate.index < settlementIndex) return false
+    val firstAfterSettlement = amountRegex.findAll(merged)
+        .firstOrNull { match ->
+            val index = match.range.first
+            index >= settlementIndex && !isLikelyNonMoneyNumber(merged, match.value, index)
+        }
+        ?.range
+        ?.first
+    return firstAfterSettlement == candidate.index
+}
+
+private fun isAfterDiscountText(merged: String, index: Int): Boolean {
+    val discountIndex = listOf("立减", "优惠", "减免", "抵扣", "满减", "券", "红包", "原价")
+        .map { merged.indexOf(it, ignoreCase = true) }
+        .filter { it >= 0 }
+        .minOrNull() ?: return false
+    return index > discountIndex
+}
+
+private fun appendRecognizedAmount(note: String, cents: Long): String {
+    val amount = "识别金额: ¥${"%.2f".format(java.util.Locale.US, cents / 100.0)}"
+    val base = note.trim()
+    return if (base.isBlank()) amount else "$base | $amount"
+}
+
 private fun isLikelyAccountNumber(merged: String, rawValue: String, index: Int): Boolean {
+    if (rawValue.contains('.') || rawValue.contains(',') || rawValue.contains("¥") || rawValue.contains("￥")) {
+        return false
+    }
     val context = window(merged, index, rawValue.length, 12)
     val onlyDigits = rawValue.filter { it.isDigit() }
     val hasAccountContext = accountContextKeywords.any { context.contains(it, ignoreCase = true) }
@@ -303,7 +339,7 @@ private fun isLikelyNonMoneyNumber(merged: String, rawValue: String, index: Int)
         trimmed.startsWith("CNY", ignoreCase = true)
 
     if (before in listOf(':', '：') || after in listOf(':', '：')) return true
-    if (after in listOf('%', '％', '折', '条', '张', '个', '件', '次', '号', '期', '小', '时', '天', '分', '秒')) return true
+    if (after in listOf('%', '％', '折', '条', '张', '个', '件', '次', '号', '期', '小', '时', '天', '分', '秒', '月', '日', '年')) return true
     if (after in listOf('g', 'G', 'm', 'M') && onlyDigits.length <= 4) return true
     if (before?.isAsciiLetterOrDigit() == true || after?.isAsciiLetterOrDigit() == true) return true
     if (hasCurrencyPrefix || hasMoneyContext) return false

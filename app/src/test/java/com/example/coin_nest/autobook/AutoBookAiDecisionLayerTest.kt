@@ -62,4 +62,21 @@ class AutoBookAiDecisionLayerTest {
         assertFalse(decision.accepted)
         assertEquals(AutoBookAiTextKind.WEALTH, decision.kind)
     }
+
+    @Test
+    fun `rejects repeated rejected content inside short window`() {
+        val text = "芝麻周报 0511-0517 周报 分享 我的芝麻分 830 分 行为积累 15次 +135"
+        val first = AutoBookAiDecisionLayer.assess(
+            packageName = "com.eg.android.AlipayGphone",
+            mergedText = text
+        )
+        val second = AutoBookAiDecisionLayer.assess(
+            packageName = "com.eg.android.AlipayGphone",
+            mergedText = text
+        )
+
+        assertFalse(first.accepted)
+        assertFalse(second.accepted)
+        assertEquals("重复拒绝窗口", second.reason)
+    }
 }

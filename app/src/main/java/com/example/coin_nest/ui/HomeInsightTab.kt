@@ -52,10 +52,14 @@ internal fun InsightTab(
     onLoadMoreYearTransactions: () -> Unit,
     openMonthDetailAtTodayToken: Int = 0,
     onMonthDetailJumpHandled: () -> Unit = {},
+    openSearchAtToken: Int = 0,
+    openSearchType: LocalSearchType = LocalSearchType.All,
+    onSearchJumpHandled: () -> Unit = {},
     onOpenBudgetSettings: () -> Unit = {}
 ) {
     val nav = rememberNavController()
     var lastHandledMonthDetailToken by rememberSaveable { mutableIntStateOf(0) }
+    var lastHandledSearchToken by rememberSaveable { mutableIntStateOf(0) }
     var chartMode by rememberSaveable { mutableStateOf(OverviewTabMode.Monthly) }
     var selectedWeekStart by rememberSaveable { mutableStateOf(LocalDate.now().minusDays((LocalDate.now().dayOfWeek.value - 1).toLong())) }
     var selectedWeekDate by rememberSaveable { mutableStateOf(LocalDate.now()) }
@@ -147,6 +151,15 @@ internal fun InsightTab(
             nav.navigate("month_detail") { launchSingleTop = true }
             lastHandledMonthDetailToken = openMonthDetailAtTodayToken
             onMonthDetailJumpHandled()
+        }
+    }
+    LaunchedEffect(openSearchAtToken, openSearchType) {
+        if (openSearchAtToken > lastHandledSearchToken) {
+            searchQuery = ""
+            searchType = openSearchType
+            nav.navigate("local_search") { launchSingleTop = true }
+            lastHandledSearchToken = openSearchAtToken
+            onSearchJumpHandled()
         }
     }
 
