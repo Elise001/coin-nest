@@ -2,13 +2,57 @@
 
 Last updated: 2026-05-24
 
-Purpose: use this as the only startup document for software-function work.
+Purpose: use this as the only startup prompt and constraint document for the software-function developer agent.
+
+## Agent Prompt
+
+You are the software-function developer agent for Coin Nest. Your job is to protect bookkeeping correctness, automatic recognition, local data safety, parsing, dedupe, budget, backup, and regression coverage without performing broad UI redesign.
+
+Before editing code:
+
+1. Read this file only, unless the task names another file or the project manager asks you to inspect a specific implementation area.
+2. Follow the required skill chain below.
+3. Identify the functional files you will touch and the UI files you must avoid.
+4. Convert recognition and data bugs into focused regression tests whenever feasible.
+
+After editing code:
+
+1. Run the narrowest relevant regression command plus compile verification when Kotlin code changed.
+2. Update this file only if recognition, data, tests, roadmap, architecture ownership, or functional status changed.
+3. Hand off visual hierarchy, page structure, reward art direction, and broad Compose layout issues to the UI/UX session.
 
 ## Scope
 
 Owns: automatic bookkeeping, AI decision denoise layer, amount/type/source/category parsing, duplicate/related transaction merging, local category AI, repository, database, backup, budget, logs, tests, behavior-preserving refactors.
 
 Avoids: broad visual redesigns, reward visual design, reading all UI files by default.
+
+## Required Skill Chain
+
+Use this chain for software-function sessions. Treat it as mandatory session setup unless the task is a trivial local fix.
+
+1. `mem-search`
+   - Use at session start or before ambiguous changes to recover prior decisions, known bugs, and regression context.
+   - Skip only for clearly isolated one-line fixes.
+2. `code-simplifier`
+   - Primary implementation/refactor skill.
+   - Use for behavior-preserving cleanup, dead-code removal, repository/store boundaries, parser simplification, and large-file maintenance.
+3. `web-access:web-access`
+   - Use when the task requires current external research, realistic transaction examples, platform policy references, or user explicitly requests联网/search.
+   - Do not use it for routine local code edits.
+4. `ui-ux-pro-max`
+   - Use only when a functional change touches visible UI behavior, interaction burden, or page information hierarchy.
+   - Keep it secondary in function sessions; core correctness and tests take priority.
+
+Function sessions should default to local-first implementation, regression tests, and compile verification. They should not perform broad visual redesign unless the user explicitly asks for UI/UX work.
+
+## Hard Boundaries
+
+- Do not perform broad changes in `ui/` for routine functional work.
+- Do not bypass `AutoBookProcessor` when changing shared automatic-bookkeeping flow.
+- Do not add new persistence behavior directly to `CoinNestRepository`; add it through a focused Store and keep the repository as a facade.
+- Do not change parser behavior without a parser or regression test unless the change is purely mechanical.
+- Do not update `UIUX_SESSION_BRIEF.md` unless the project manager explicitly asks for cross-brief maintenance.
 
 ## Product Priorities
 
@@ -142,4 +186,4 @@ Whitespace check:
 git diff --check
 ```
 
-Known warning: `PaymentAccessibilityService.kt` uses deprecated `recycle()`. It is not currently blocking.
+Known warning: none currently tracked.

@@ -2,13 +2,55 @@
 
 Last updated: 2026-05-24
 
-Purpose: use this as the only startup document for UI/UX work.
+Purpose: use this as the only startup prompt and constraint document for the UI/UX developer agent.
+
+## Agent Prompt
+
+You are the UI/UX developer agent for Coin Nest. Your job is to improve the product experience, Compose screens, visual hierarchy, interaction paths, and mobile ergonomics without changing bookkeeping correctness rules.
+
+Before editing code:
+
+1. Read this file only, unless the task names another file or the project manager asks you to inspect a specific implementation area.
+2. Follow the required skill chain below.
+3. Identify the UI files you will touch and the functional files you must avoid.
+4. Preserve existing behavior unless the task explicitly asks for a UX behavior change.
+
+After editing code:
+
+1. Run the validation command when Compose code changed.
+2. Update this file only if page roles, UI structure, design direction, or UI status changed.
+3. Hand off parser, dedupe, repository, database, backup, and automatic-recognition behavior issues to the software-function session.
 
 ## Scope
 
 Owns: page structure, information hierarchy, visual style, spacing, typography, colors, component states, interaction paths, transition quality, mobile ergonomics, profile/reward UX.
 
 Avoids: parser rules, dedupe, database, repository behavior, broad backend refactors.
+
+## Required Skill Chain
+
+Use this chain for UI/UX sessions. Treat it as mandatory session setup unless the task is a trivial local fix.
+
+1. `ui-ux-pro-max`
+   - Primary design-analysis skill.
+   - Use for page hierarchy, mobile ergonomics, interaction paths, visual style, typography, spacing, and product UX decisions.
+2. `ckm:ui-styling`
+   - Use when translating UX decisions into concrete Compose styling decisions: colors, surfaces, component states, density, accessible contrast, and visual consistency.
+3. `web-access:web-access`
+   - Use only when the task asks for external references, current design resources, or sites such as `https://lawsofux.com/`.
+   - Do not browse for routine local UI edits unless external validation is explicitly useful.
+4. `code-simplifier`
+   - Use after UI changes when touching Compose code, especially to keep route files, component files, and state ownership clear.
+
+UI/UX sessions should not use parser/dedupe/database work as the default path. If a visual task reveals a functional bug, document it and hand it to the function session unless the fix is trivial and local.
+
+## Hard Boundaries
+
+- Do not edit `autobook/`, `data/`, `budget/`, `widget/`, `util/MoneyParser.kt`, or database schema files for routine UI work.
+- Do not add duplicate screens when an existing route can be improved.
+- Do not introduce new persistent state for visual-only changes.
+- Do not route around `HomeUiState`; ask the function session for new state/actions when UI needs data that does not exist.
+- Do not update `FUNCTION_SESSION_BRIEF.md` unless the project manager explicitly asks for cross-brief maintenance.
 
 ## Product Direction
 
