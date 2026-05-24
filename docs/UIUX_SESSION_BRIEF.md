@@ -68,6 +68,10 @@ UI/UX sessions should not use parser/dedupe/database work as the default path. I
 
 ## Recent UI Status
 
+- Insight local search now follows a search-first card layout: lighter status badge, compact filters, stronger input affordance, and shorter empty-state copy.
+- Home budget row and metric pills protect narrow-screen text with single-line ellipsis and clearer spacing.
+- Bottom tabs keep a wider label slot, selected screen reader state, and no duplicate icon announcement.
+- Record quick controls have stronger minimum touch width and shorter section copy for small screens.
 - Bottom tabs removed border, top separator, and icon indicator line.
 - Home income/expense metrics open local ledger directly.
 - Home income/expense entries use month scope, not year scope.

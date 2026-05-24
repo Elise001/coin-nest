@@ -1,6 +1,7 @@
 package com.example.coin_nest.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -12,6 +13,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -41,6 +44,7 @@ internal fun InsightSearchRoute(
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
@@ -65,16 +69,22 @@ internal fun InsightSearchRoute(
         if (results.isEmpty()) {
             item {
                 GlassCard {
-                    Text("没有找到匹配流水", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "没有找到匹配流水",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         if (searchScope == LocalSearchScope.Year) {
-                            "可尝试输入金额、来源、分类或备注关键词；如果年份数据较多，也可以先加载更多。"
+                            "换一个金额、来源、分类或备注关键词；年份数据较多时可继续加载。"
                         } else {
-                            "可尝试输入金额、来源、分类或备注关键词；本月没有时可切换到本年查看。"
+                            "换一个关键词，或切到本年查看更早流水。"
                         },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

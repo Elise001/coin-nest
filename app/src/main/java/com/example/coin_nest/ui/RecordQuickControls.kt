@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -46,6 +47,7 @@ internal fun SegmentedSelector(
                     .weight(1f)
                     .clip(RoundedCornerShape(8.dp))
                     .heightIn(min = 44.dp)
+                    .defaultMinSize(minWidth = 72.dp)
                     .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
                     .border(
                         width = 1.dp,
@@ -62,6 +64,8 @@ internal fun SegmentedSelector(
             ) {
                 Text(
                     text = text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold
                 )
@@ -80,6 +84,7 @@ internal fun QuickActionChip(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .heightIn(min = 44.dp)
+            .defaultMinSize(minWidth = 56.dp)
             .background(
                 if (selected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surface
@@ -106,4 +111,3 @@ internal fun QuickActionChip(
         )
     }
 }
-

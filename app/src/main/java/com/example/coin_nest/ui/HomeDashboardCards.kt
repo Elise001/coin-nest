@@ -142,18 +142,27 @@ internal fun MoneyHeroCard(
                     .padding(10.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             text = budget?.let { "预算剩余 ${MoneyFormat.fromCents(leftBudget ?: 0L)}" } ?: "还没设本月预算",
+                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall,
-                            color = heroTextColor
+                            color = heroTextColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = budget?.let { "${(budgetRatio * 100).toInt()}%" } ?: "去我的页设置",
                             modifier = if (budget == null) Modifier.clickable { onOpenBudgetSettings() } else Modifier,
                             style = MaterialTheme.typography.bodySmall,
                             color = if (budget == null) Sky700 else heroSubtleColor,
-                            fontWeight = if (budget == null) FontWeight.SemiBold else FontWeight.Normal
+                            fontWeight = if (budget == null) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     Box(
@@ -231,6 +240,7 @@ private fun MoneyHeroMetric(
             .clip(RoundedCornerShape(10.dp))
             .background(Color.White.copy(alpha = 0.76f))
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .defaultMinSize(minHeight = 56.dp)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -258,7 +268,9 @@ internal fun SignalCard(
 ) {
     GlassCard(
         tone = if (warning) GlassCardTone.Warning else GlassCardTone.Neutral,
-        modifier = Modifier.clickable { onClick() }
+        modifier = Modifier
+            .defaultMinSize(minHeight = 72.dp)
+            .clickable { onClick() }
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(
@@ -295,7 +307,11 @@ internal fun TopCategoryCard(
     topCategory: CategoryShare?,
     onOpenInsight: () -> Unit
 ) {
-    GlassCard(modifier = Modifier.clickable { onOpenInsight() }) {
+    GlassCard(
+        modifier = Modifier
+            .defaultMinSize(minHeight = 68.dp)
+            .clickable { onOpenInsight() }
+    ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("本月最花钱", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -312,7 +328,13 @@ internal fun TopCategoryCard(
                     )
                 }
             }
-            Text("去洞察", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                "去洞察",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
         }
     }
 }
@@ -358,4 +380,3 @@ private fun buildMonthBudgetProjection(
         )
     }
 }
-

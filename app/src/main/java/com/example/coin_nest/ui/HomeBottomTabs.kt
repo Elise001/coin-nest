@@ -35,11 +35,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.coin_nest.ui.theme.Sky200
 import com.example.coin_nest.ui.theme.Sky700
@@ -90,6 +92,7 @@ internal fun BottomMainTabs(
                         .semantics {
                             role = Role.Tab
                             this.selected = selected
+                            contentDescription = if (selected) "${tab.title}，当前页" else tab.title
                         }
                         .clickable(
                             interactionSource = interactionSource,
@@ -101,13 +104,13 @@ internal fun BottomMainTabs(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             imageVector = tabIcon(tab),
-                            contentDescription = tab.title,
+                            contentDescription = null,
                             modifier = Modifier.size(22.dp),
                             tint = if (selected) tabSelectedColor else tabUnselectedColor
                         )
                         Spacer(modifier = Modifier.height(3.dp))
                         Box(
-                            modifier = Modifier.width(40.dp),
+                            modifier = Modifier.width(48.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -116,7 +119,8 @@ internal fun BottomMainTabs(
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                 style = MaterialTheme.typography.labelSmall,
                                 textAlign = TextAlign.Center,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -132,4 +136,3 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Insight -> Icons.Filled.BarChart
     MainTab.Profile -> Icons.Filled.Person
 }
-

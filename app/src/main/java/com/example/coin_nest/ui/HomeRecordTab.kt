@@ -3,6 +3,7 @@
 import android.app.DatePickerDialog
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -146,6 +147,7 @@ internal fun RecordTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         if (state.pendingAutoTransactions.isNotEmpty()) {
@@ -170,7 +172,7 @@ internal fun RecordTab(
 
         item {
             GlassCard {
-                SectionTitle(title = "快速记账", subtitle = "金额优先，备注延后，减少一次性输入压力")
+                SectionTitle(title = "快速记账", subtitle = "先选收支和模板，再补金额与分类")
                 Spacer(modifier = Modifier.height(10.dp))
 
                 SegmentedSelector(
@@ -180,7 +182,7 @@ internal fun RecordTab(
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
-                SectionTitle(title = "快捷填充")
+                SectionTitle(title = "常用场景")
                 Spacer(modifier = Modifier.height(8.dp))
 
                 SegmentedSelector(

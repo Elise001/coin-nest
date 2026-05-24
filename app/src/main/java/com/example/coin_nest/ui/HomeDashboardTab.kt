@@ -1,6 +1,7 @@
 package com.example.coin_nest.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -60,6 +61,7 @@ internal fun HomeDashboardTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp)
     ) {
         item {
@@ -130,4 +132,3 @@ internal fun HomeDashboardTab(
         }
     }
 }
-
