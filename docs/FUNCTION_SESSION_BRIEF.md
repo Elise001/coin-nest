@@ -1,6 +1,6 @@
 # Function Session Brief
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 
 Purpose: use this as the only startup prompt and constraint document for the software-function developer agent.
 
@@ -69,6 +69,8 @@ Local-first comes before cloud. Core bookkeeping must not depend on network.
 - Notification and accessibility entries now share `AutoBookProcessor` for AI decision, parsing, telemetry, and repository insertion. Services should stay as capture/debounce/adaptor layers.
 - AI decision layer rejects noise, marketing, coupon, wealth-management, long text, low-confidence content, and repeated rejected content in a short window.
 - Parser handles payment/refund/income/expense, source inference, actual paid amount over original/discount amount, and non-money number rejection.
+- Parser now avoids choosing bank/card tail numbers as settlement amounts, including small decimal card spends such as 2.50 yuan after a 4-digit tail number.
+- AI decision layer now rejects coupon-price/product-card text such as "券后/到手价/领券" when there is no strong settlement signal.
 - Pending auto notes append recognized amount for debugging screenshots.
 - Duplicate/related transaction scoring has tests for same-source and cross-source cases.
 - Local category AI supports workday/rest-day logic, 2026 holiday overrides, and filters generic learned tokens such as `android`, `widget`, `layout`, `alipay`, `wechat`.
@@ -159,6 +161,23 @@ For each recognition bug, record:
 - wrong current outcome;
 - test file added;
 - verification command.
+
+Recent records:
+
+- 2026-05-25 bank card amount regression:
+  - source app/package: 招商银行 / `cmb.pb`;
+  - raw title/text/accessibility text: title `招商银行 信用卡通知`; text `您尾号4921的招行信用卡消费2.50人民币。`; accessibility text not involved;
+  - expected outcome: parse expense amount `¥2.50`;
+  - wrong outcome: recognized account tail `4921` as `¥4921.00`;
+  - test file added: `app/src/test/java/com/example/coin_nest/autobook/PaymentNotificationParserTest.kt`;
+  - verification command: targeted auto-book regression plus `./gradlew compileDebugKotlin --console=plain`.
+- 2026-05-25 Alipay product-card false positive:
+  - source app/package: 支付宝 / `com.eg.android.AlipayGphone`;
+  - raw title/text/accessibility text: title `支付宝自动识别`; text `支付宝 2/9 2/9 2/9 2/9 2/9 2/9 2/9 2/9 2/9 ￥29.90 券后￥0 起 马年入户玄关门垫50*80cm 进宅大吉`; accessibility text not involved;
+  - expected outcome: reject as marketing/product-card text, no pending transaction;
+  - wrong outcome: accepted as pending expense and recognized `¥9.00`;
+  - test file added: `app/src/test/java/com/example/coin_nest/autobook/PaymentNotificationParserTest.kt`, `app/src/test/java/com/example/coin_nest/autobook/AutoBookAiDecisionLayerTest.kt`;
+  - verification command: targeted auto-book regression plus `./gradlew compileDebugKotlin --console=plain`.
 
 ## Verification Commands
 

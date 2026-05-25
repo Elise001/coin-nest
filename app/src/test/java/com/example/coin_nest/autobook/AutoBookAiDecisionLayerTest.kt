@@ -42,6 +42,17 @@ class AutoBookAiDecisionLayerTest {
     }
 
     @Test
+    fun `rejects alipay product price card with coupon suffix`() {
+        val decision = AutoBookAiDecisionLayer.assess(
+            packageName = "com.eg.android.AlipayGphone",
+            mergedText = "支付宝商品卡片 2/9 2/9 ￥29.90 券后￥0 起 马年入户玄关门垫50*80cm 进宅大吉"
+        )
+
+        assertFalse(decision.accepted)
+        assertEquals(AutoBookAiTextKind.MARKETING, decision.kind)
+    }
+
+    @Test
     fun `rejects subsidy popup pretending to arrive`() {
         val decision = AutoBookAiDecisionLayer.assess(
             packageName = "com.jingdong.app.mall",

@@ -277,7 +277,7 @@ private fun scoreAmountCandidate(merged: String, candidate: AmountCandidate): In
     if (isAfterDiscountText(merged, candidate.index)) score -= 12
     if (discountAmountContextKeywords.any { widerContext.contains(it, ignoreCase = true) }) score -= 14
     if (strongPaymentKeywords.any { merged.contains(it, ignoreCase = true) }) score += 2
-    if (isLikelyAccountNumber(merged, candidate.raw, candidate.index)) score -= 12
+    if (isLikelyAccountNumber(merged, candidate.raw, candidate.index)) score -= 40
     if (isLikelyNonMoneyNumber(merged, candidate.raw, candidate.index)) score -= 16
     if (candidate.cents >= 1_000_000 && !hasDecimal) score -= 2
     return score
@@ -292,7 +292,9 @@ private fun isFirstSettlementAmount(merged: String, candidate: AmountCandidate):
     val firstAfterSettlement = amountRegex.findAll(merged)
         .firstOrNull { match ->
             val index = match.range.first
-            index >= settlementIndex && !isLikelyNonMoneyNumber(merged, match.value, index)
+            index >= settlementIndex &&
+                !isLikelyAccountNumber(merged, match.value, index) &&
+                !isLikelyNonMoneyNumber(merged, match.value, index)
         }
         ?.range
         ?.first
@@ -339,6 +341,7 @@ private fun isLikelyNonMoneyNumber(merged: String, rawValue: String, index: Int)
         trimmed.startsWith("CNY", ignoreCase = true)
 
     if (before in listOf(':', '：') || after in listOf(':', '：')) return true
+    if (before in listOf('/', '\\', '*', 'x', 'X', '×') || after in listOf('/', '\\', '*', 'x', 'X', '×')) return true
     if (after in listOf('%', '％', '折', '条', '张', '个', '件', '次', '号', '期', '小', '时', '天', '分', '秒', '月', '日', '年')) return true
     if (after in listOf('g', 'G', 'm', 'M') && onlyDigits.length <= 4) return true
     if (before?.isAsciiLetterOrDigit() == true || after?.isAsciiLetterOrDigit() == true) return true

@@ -177,6 +177,32 @@ class PaymentNotificationParserTest {
     }
 
     @Test
+    fun `choose small card consumption amount instead of account tail number`() {
+        val debug = PaymentNotificationParser.parseWithDebug(
+            packageName = "cmb.pb",
+            title = "招商银行 信用卡通知",
+            text = "您尾号4921的招行信用卡消费2.50人民币。",
+            postTime = 1_716_606_600_000
+        )
+        val parsed = debug.payment
+
+        assertNotNull(debug.reason, parsed)
+        assertEquals(250L, parsed!!.amountCents)
+    }
+
+    @Test
+    fun `ignore alipay product card with coupon price and size numbers`() {
+        val parsed = PaymentNotificationParser.parse(
+            packageName = "com.eg.android.AlipayGphone",
+            title = "支付宝自动识别",
+            text = "支付宝 2/9 2/9 2/9 2/9 2/9 2/9 2/9 2/9 2/9 ￥29.90 券后￥0 起 马年入户玄关门垫50*80cm 进宅大吉",
+            postTime = 1_716_603_540_000
+        )
+
+        assertNull(parsed)
+    }
+
+    @Test
     fun `ignore jd cash reminder duration without real amount`() {
         val parsed = PaymentNotificationParser.parse(
             packageName = "com.jingdong.app.mall",
